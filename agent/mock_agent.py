@@ -1,18 +1,32 @@
 """LabSense Mock Agent for Demonstration.
 
-Simulates periodic agent heartbeats from Windows to test state transitions
-and real-time dashboard updates without needing a Linux VM or D-Bus.
+Simulates periodic agent heartbeats from Windows (or any OS) to test
+state transitions and real-time dashboard updates without needing
+a Linux VM or D-Bus.
+
+Usage:
+    python mock_agent.py <SERVER_HOST> [SERVER_PORT]
+
+Examples:
+    python mock_agent.py 192.168.1.100          # remote backend, port 9000
+    python mock_agent.py 192.168.1.100 9001     # remote backend, custom port
+    python mock_agent.py localhost               # local backend (same machine)
+
+Or via environment variables:
+    LABSENSE_SERVER_HOST=192.168.1.100 python mock_agent.py
 """
 
 import asyncio
 import json
+import os
 import random
 import struct
 import sys
 from datetime import datetime, timezone
 
-SERVER_HOST = "localhost"
-SERVER_PORT = 9000
+# Resolve server address: CLI args > env vars > defaults
+SERVER_HOST = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("LABSENSE_SERVER_HOST", "localhost")
+SERVER_PORT = int(sys.argv[2]) if len(sys.argv) > 2 else int(os.environ.get("LABSENSE_SERVER_PORT", "9000"))
 PC_IDS = ["lab-a-pc-1", "lab-a-pc-2", "lab-a-pc-3", "lab-a-pc-4", "lab-a-pc-5"]
 
 
@@ -56,7 +70,7 @@ async def run_mock_pc(pc_id: str):
                 await asyncio.sleep(5.0)
 
         except (ConnectionRefusedError, OSError):
-            print(f"[{pc_id}] Backend not reachable, retrying in 5s...")
+            print(f"[{pc_id}] Backend not reachable at {SERVER_HOST}:{SERVER_PORT}, retrying in 5s...")
             await asyncio.sleep(5.0)
         except Exception as e:
             print(f"[{pc_id}] Error: {e}, reconnecting...")
@@ -65,14 +79,18 @@ async def run_mock_pc(pc_id: str):
 
 async def main():
     print("=" * 60)
-    print(" LabSense Mock PC Agent Simulator")
-    print(f" Simulating 5 PCs sending heartbeats to {SERVER_HOST}:{SERVER_PORT}")
+    print("  LabSense Mock PC Agent Simulator")
+    print(f"  Target: {SERVER_HOST}:{SERVER_PORT}")
+    print(f"  Simulating {len(PC_IDS)} PCs: {', '.join(PC_IDS)}")
     print("=" * 60)
     tasks = [run_mock_pc(pc_id) for pc_id in PC_IDS]
     await asyncio.gather(*tasks)
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
+        print(__doc__)
+        sys.exit(0)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
