@@ -6,6 +6,13 @@ export const authApi = {
     api.post('/auth/register', { email, password, full_name: fullName, role }),
 }
 
+export const adminApi = {
+  createLab: (lab) => api.post('/admin/labs', lab),
+  deleteLab: (labId) => api.delete(`/admin/labs/${labId}`),
+  createPC: (labId) => api.post('/admin/pcs', { lab_id: labId }),
+  deletePC: (pcId) => api.delete(`/admin/pcs/${pcId}`),
+}
+
 export const labsApi = {
   getLabs: () => api.get('/labs'),
   getLab: (labId) => api.get(`/labs/${labId}`),

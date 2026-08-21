@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import PCCard from './PCCard'
 import { FiMonitor, FiFilter } from 'react-icons/fi'
 
-const PCGrid = ({ pcs = [], onStatusChanged }) => {
+const PCGrid = ({ pcs = [], onStatusChanged, onDeletePC }) => {
   const [filter, setFilter] = useState('ALL')
 
   const filteredPcs = pcs.filter((pc) => {
@@ -81,7 +81,7 @@ const PCGrid = ({ pcs = [], onStatusChanged }) => {
       ) : (
         <div className="grid-container grid-5">
           {filteredPcs.map((pc) => (
-            <PCCard key={pc.pc_id} pc={pc} onStatusChanged={onStatusChanged} />
+            <PCCard key={pc.pc_id} pc={pc} onStatusChanged={onStatusChanged} onDeletePC={onDeletePC} />
           ))}
         </div>
       )}

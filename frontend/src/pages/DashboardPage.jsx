@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react'
-import { labsApi, softwareApi } from '../api/endpoints'
+import React, { useState, useEffect, useContext } from 'react'
+import { labsApi, softwareApi, adminApi } from '../api/endpoints'
+import { AuthContext } from '../context/AuthContext'
 import { useLabState } from '../hooks/useLabState'
 import LabCard from '../components/Dashboard/LabCard'
 import SearchBar from '../components/Software/SearchBar'
@@ -11,6 +12,7 @@ import {
   FiActivity,
   FiRefreshCw,
   FiCheckCircle,
+  FiPlus,
 } from 'react-icons/fi'
 
 const DashboardPage = () => {
@@ -20,6 +22,10 @@ const DashboardPage = () => {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
   const [searchLoading, setSearchLoading] = useState(false)
+
+  const { isAdmin } = useContext(AuthContext)
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [newLabData, setNewLabData] = useState({ lab_id: '', lab_name: '', operating_start_time: '08:00', operating_end_time: '20:00' })
 
   const { labStates, pcStates } = useLabState()
 
@@ -44,7 +50,7 @@ const DashboardPage = () => {
 
   // Sync labs with real-time websocket updates
   const mergedLabs = labs.map((lab) => {
-    const liveLabState = labStates[lab.id]
+    const liveLabState = labStates[lab.lab_id]
     return {
       ...lab,
       state: liveLabState || lab.state,
@@ -71,6 +77,27 @@ const DashboardPage = () => {
     }
   }
 
+  const handleCreateLab = async (e) => {
+    e.preventDefault()
+    try {
+      await adminApi.createLab(newLabData)
+      setShowCreateModal(false)
+      setNewLabData({ lab_id: '', lab_name: '', operating_start_time: '08:00', operating_end_time: '20:00' })
+      fetchLabs()
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Failed to create lab')
+    }
+  }
+
+  const handleDeleteLab = async (labId) => {
+    try {
+      await adminApi.deleteLab(labId)
+      fetchLabs()
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Failed to delete lab')
+    }
+  }
+
   // Calculate high level campus statistics
   const totalLabs = mergedLabs.length
   const totalCapacity = mergedLabs.reduce((acc, l) => acc + (l.capacity || 0), 0)
@@ -92,6 +119,16 @@ const DashboardPage = () => {
         </div>
 
         <div className="page-actions">
+          {isAdmin() && (
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="btn btn-primary btn-sm"
+              style={{ marginRight: '0.5rem' }}
+            >
+              <FiPlus size={14} />
+              <span>Add Lab</span>
+            </button>
+          )}
           <button
             onClick={() => fetchLabs(true)}
             className="btn btn-secondary btn-sm"
@@ -102,6 +139,34 @@ const DashboardPage = () => {
           </button>
         </div>
       </div>
+
+      {showCreateModal && (
+        <div className="glass-panel" style={{ padding: '1.25rem', marginBottom: '1.25rem' }}>
+          <h3>Add New Lab</h3>
+          <form onSubmit={handleCreateLab} style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap', marginTop: '1rem' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.25rem' }}>Lab ID</label>
+              <input required value={newLabData.lab_id} onChange={e => setNewLabData({...newLabData, lab_id: e.target.value})} className="form-control" placeholder="e.g. 408" />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.25rem' }}>Lab Name</label>
+              <input required value={newLabData.lab_name} onChange={e => setNewLabData({...newLabData, lab_name: e.target.value})} className="form-control" placeholder="e.g. Computer Lab 408" />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.25rem' }}>Start Time</label>
+              <input required type="time" value={newLabData.operating_start_time} onChange={e => setNewLabData({...newLabData, operating_start_time: e.target.value})} className="form-control" />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.25rem' }}>End Time</label>
+              <input required type="time" value={newLabData.operating_end_time} onChange={e => setNewLabData({...newLabData, operating_end_time: e.target.value})} className="form-control" />
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button type="submit" className="btn btn-primary">Create</button>
+              <button type="button" className="btn btn-secondary" onClick={() => setShowCreateModal(false)}>Cancel</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Summary KPI Cards */}
       <div className="grid-container grid-4">
@@ -206,7 +271,7 @@ const DashboardPage = () => {
         ) : (
           <div className="grid-container grid-3">
             {mergedLabs.map((lab) => (
-              <LabCard key={lab.id} lab={lab} />
+              <LabCard key={lab.lab_id} lab={lab} isAdmin={isAdmin()} onDelete={handleDeleteLab} />
             ))}
           </div>
         )}

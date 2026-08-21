@@ -137,8 +137,8 @@ const Sidebar = () => {
               ) : (
                 labs.map((lab) => (
                   <NavLink
-                    key={lab.id}
-                    to={`/labs/${lab.id}`}
+                    key={lab.lab_id}
+                    to={`/labs/${lab.lab_id}`}
                     className={({ isActive }) =>
                       `sidebar-link ${isActive ? 'active' : ''}`
                     }

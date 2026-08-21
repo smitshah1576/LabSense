@@ -10,6 +10,7 @@ import {
   FiUserCheck,
   FiTool,
   FiActivity,
+  FiTrash2,
 } from 'react-icons/fi'
 
 const STATE_LABELS = {
@@ -19,7 +20,7 @@ const STATE_LABELS = {
   MAINTENANCE: 'Maintenance',
 }
 
-const PCCard = ({ pc, liveState, onStatusChanged }) => {
+const PCCard = ({ pc, liveState, onStatusChanged, onDeletePC }) => {
   const { isProfessor, isAdmin } = useAuth()
   const [loadingToggle, setLoadingToggle] = useState(false)
 
@@ -143,23 +144,46 @@ const PCCard = ({ pc, liveState, onStatusChanged }) => {
           <span>Heartbeat: {formatHeartbeat(lastHeartbeat)}</span>
         </div>
 
-        {(isAdmin() || isProfessor()) && (
-          <button
-            onClick={handleToggleMaintenance}
-            disabled={loadingToggle}
-            className={`btn btn-sm ${isMaintenance ? 'btn-success' : 'btn-ghost'}`}
-            style={{
-              padding: '0.2rem 0.55rem',
-              fontSize: '0.7rem',
-              borderRadius: 'var(--radius-sm)',
-              border: isMaintenance ? 'none' : '1px solid var(--border-subtle)',
-            }}
-            title={isMaintenance ? 'Clear maintenance mode' : 'Mark PC for maintenance'}
-          >
-            <FiTool size={11} />
-            <span>{loadingToggle ? '...' : isMaintenance ? 'Resolve' : 'Maint.'}</span>
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: '0.3rem' }}>
+          {(isAdmin() || isProfessor()) && (
+            <button
+              onClick={handleToggleMaintenance}
+              disabled={loadingToggle}
+              className={`btn btn-sm ${isMaintenance ? 'btn-success' : 'btn-ghost'}`}
+              style={{
+                padding: '0.2rem 0.55rem',
+                fontSize: '0.7rem',
+                borderRadius: 'var(--radius-sm)',
+                border: isMaintenance ? 'none' : '1px solid var(--border-subtle)',
+              }}
+              title={isMaintenance ? 'Clear maintenance mode' : 'Mark PC for maintenance'}
+            >
+              <FiTool size={11} />
+              <span>{loadingToggle ? '...' : isMaintenance ? 'Resolve' : 'Maint.'}</span>
+            </button>
+          )}
+          {isAdmin() && onDeletePC && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                if (window.confirm(`Delete PC ${pc.pc_id}? This cannot be undone.`)) {
+                  onDeletePC(pc.pc_id)
+                }
+              }}
+              className="btn btn-sm btn-ghost"
+              style={{
+                padding: '0.2rem 0.4rem',
+                fontSize: '0.7rem',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--color-danger)',
+                color: 'var(--color-danger)',
+              }}
+              title="Delete PC"
+            >
+              <FiTrash2 size={11} />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )

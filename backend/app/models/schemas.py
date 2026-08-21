@@ -46,6 +46,32 @@ class TokenResponse(BaseModel):
 
 # --- Lab & PC Schemas ---
 
+class LabCreate(BaseModel):
+    """Schema for registering a new lab (admin only)."""
+
+    lab_id: str
+    lab_name: str
+    operating_start_time: time = time(8, 0)
+    operating_end_time: time = time(20, 0)
+
+
+class PCCreate(BaseModel):
+    """Schema for registering a new PC in a lab (admin only).
+
+    The pc_id is auto-generated using the convention <lab_id_3_digits><seq_2_digits>.
+    """
+
+    lab_id: str
+
+
+class PCCreateResponse(BaseModel):
+    """Schema returned after successfully registering a PC."""
+
+    pc_id: str
+    lab_id: str
+    message: str
+
+
 class LabResponse(BaseModel):
     """Schema for lab details response."""
 

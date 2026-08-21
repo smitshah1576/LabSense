@@ -31,6 +31,9 @@ async def handle_agent_connection(reader: asyncio.StreamReader, writer: asyncio.
     addr = writer.get_extra_info('peername')
     logger.info(f"New agent connection from {addr}")
     pc_id = None
+    # Cache of validated pc_ids for this connection — one DB lookup per pc_id,
+    # not per message.  True = registered, False = rejected.
+    validated_pcs: dict[str, bool] = {}
     try:
         while True:
             msg = await read_message(reader)
@@ -42,6 +45,23 @@ async def handle_agent_connection(reader: asyncio.StreamReader, writer: asyncio.
             
             if not pc_id:
                 continue
+
+            # ── Validate pc_id against DB on first encounter ──
+            if pc_id not in validated_pcs:
+                async with pool.acquire() as conn:
+                    row = await conn.fetchrow(
+                        "SELECT 1 FROM pcs WHERE pc_id = $1", pc_id
+                    )
+                validated_pcs[pc_id] = row is not None
+                if not validated_pcs[pc_id]:
+                    logger.warning(
+                        "Rejected unregistered pc_id '%s' from %s — "
+                        "register it via POST /admin/pcs first",
+                        pc_id, addr,
+                    )
+
+            if not validated_pcs[pc_id]:
+                continue  # silently drop messages from unregistered PCs
                 
             if msg_type == "HEARTBEAT":
                 await state_manager.handle_heartbeat(

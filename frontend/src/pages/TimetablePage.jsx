@@ -20,7 +20,7 @@ const TimetablePage = () => {
         if (Array.isArray(res.data)) {
           setLabs(res.data)
           if (res.data.length > 0) {
-            setSelectedLabId(res.data[0].id)
+            setSelectedLabId(res.data[0].lab_id)
           }
         }
       })
@@ -86,8 +86,8 @@ const TimetablePage = () => {
           onChange={(e) => setSelectedLabId(e.target.value)}
         >
           {labs.map((lab) => (
-            <option key={lab.id} value={lab.id} style={{ background: '#131722' }}>
-              {lab.name} ({lab.building ? `${lab.building}, ` : ''}Floor {lab.floor ?? 1})
+            <option key={lab.lab_id} value={lab.lab_id} style={{ background: '#131722' }}>
+              {lab.lab_name}
             </option>
           ))}
         </select>

@@ -146,6 +146,13 @@ class PCStateManager:
         except asyncio.CancelledError:
             pass  # Timer was reset by a new heartbeat
     
+    async def remove_pc(self, pc_id: str) -> None:
+        """Remove a PC from in-memory state and cancel its staleness timer."""
+        async with self._lock:
+            state = self._states.pop(pc_id, None)
+            if state and state.staleness_task:
+                state.staleness_task.cancel()
+
     async def get_state(self, pc_id: str) -> Optional[PCLiveState]:
         async with self._lock:
             return self._states.get(pc_id)

@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useContext } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { labsApi, pcsApi, softwareApi, timetableApi } from '../api/endpoints'
+import { labsApi, pcsApi, softwareApi, timetableApi, adminApi } from '../api/endpoints'
+import { AuthContext } from '../context/AuthContext'
 import { useLabState } from '../hooks/useLabState'
 import PCGrid from '../components/Dashboard/PCGrid'
 import StatusIndicator from '../components/Dashboard/StatusIndicator'
@@ -16,6 +17,7 @@ import {
   FiCalendar,
   FiRefreshCw,
   FiAlertTriangle,
+  FiPlus,
 } from 'react-icons/fi'
 
 const LabDetailPage = () => {
@@ -26,6 +28,8 @@ const LabDetailPage = () => {
   const [cancellations, setCancellations] = useState([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('workstations') // 'workstations' | 'timetable' | 'software'
+
+  const { isAdmin } = useContext(AuthContext)
 
   // Lab-specific software search
   const [softwareQuery, setSoftwareQuery] = useState('')
@@ -104,6 +108,24 @@ const LabDetailPage = () => {
     setPcs((prev) =>
       prev.map((p) => (p.pc_id === pcId ? { ...p, current_state: newStatus } : p))
     )
+  }
+
+  const handleCreatePC = async () => {
+    try {
+      await adminApi.createPC(labId)
+      loadLabData() // Refresh to fetch new PC
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Failed to create PC')
+    }
+  }
+
+  const handleDeletePC = async (pcId) => {
+    try {
+      await adminApi.deletePC(pcId)
+      loadLabData()
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Failed to delete PC')
+    }
   }
 
   const availablePcCount = livePcs.filter(
@@ -208,43 +230,56 @@ const LabDetailPage = () => {
       <div
         style={{
           display: 'flex',
-          gap: '0.5rem',
+          justifyContent: 'space-between',
+          alignItems: 'center',
           borderBottom: '1px solid var(--border-glass)',
           paddingBottom: '0.5rem',
         }}
       >
-        <button
-          onClick={() => setActiveTab('workstations')}
-          className={`btn ${activeTab === 'workstations' ? 'btn-primary' : 'btn-ghost'}`}
-          style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }}
-        >
-          <FiMonitor size={15} />
-          <span>Live Workstations ({livePcs.length})</span>
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button
+            onClick={() => setActiveTab('workstations')}
+            className={`btn ${activeTab === 'workstations' ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }}
+          >
+            <FiMonitor size={15} />
+            <span>Live Workstations ({livePcs.length})</span>
+          </button>
 
-        <button
-          onClick={() => setActiveTab('timetable')}
-          className={`btn ${activeTab === 'timetable' ? 'btn-primary' : 'btn-ghost'}`}
-          style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }}
-        >
-          <FiCalendar size={15} />
-          <span>Lab Timetable & Schedule</span>
-        </button>
+          <button
+            onClick={() => setActiveTab('timetable')}
+            className={`btn ${activeTab === 'timetable' ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }}
+          >
+            <FiCalendar size={15} />
+            <span>Lab Timetable & Schedule</span>
+          </button>
 
-        <button
-          onClick={() => setActiveTab('software')}
-          className={`btn ${activeTab === 'software' ? 'btn-primary' : 'btn-ghost'}`}
-          style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }}
-        >
-          <FiSearch size={15} />
-          <span>Installed Software Locator</span>
-        </button>
+          <button
+            onClick={() => setActiveTab('software')}
+            className={`btn ${activeTab === 'software' ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }}
+          >
+            <FiSearch size={15} />
+            <span>Installed Software Locator</span>
+          </button>
+        </div>
+        
+        {isAdmin() && activeTab === 'workstations' && (
+          <button
+            onClick={handleCreatePC}
+            className="btn btn-primary btn-sm"
+          >
+            <FiPlus size={14} />
+            <span>Add PC</span>
+          </button>
+        )}
       </div>
 
       {/* Tab 1: Live PC Grid */}
       {activeTab === 'workstations' && (
         <div>
-          <PCGrid pcs={livePcs} onStatusChanged={handlePcStatusChange} />
+          <PCGrid pcs={livePcs} onStatusChanged={handlePcStatusChange} onDeletePC={handleDeletePC} />
         </div>
       )}
 

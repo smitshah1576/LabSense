@@ -5,9 +5,10 @@ import {
   FiClock,
   FiMonitor,
   FiArrowRight,
+  FiTrash2,
 } from 'react-icons/fi'
 
-const LabCard = ({ lab }) => {
+const LabCard = ({ lab, isAdmin, onDelete }) => {
   const navigate = useNavigate()
 
   const labState = (lab.state || 'OPEN').toUpperCase()
@@ -36,6 +37,13 @@ const LabCard = ({ lab }) => {
     return timeStr
   }
 
+  const handleDelete = (e) => {
+    e.stopPropagation()
+    if (window.confirm(`Are you sure you want to delete lab ${lab.lab_name} and ALL its PCs?`)) {
+      onDelete(lab.lab_id)
+    }
+  }
+
   return (
     <div
       onClick={() => navigate(`/labs/${lab.lab_id}`)}
@@ -52,8 +60,18 @@ const LabCard = ({ lab }) => {
       }}
     >
       <div className="lab-card-header">
-        <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <h3 className="lab-name">{lab.lab_name}</h3>
+          {isAdmin && (
+            <button
+              onClick={handleDelete}
+              className="btn btn-sm"
+              style={{ padding: '0.2rem', color: 'var(--color-danger)', background: 'transparent', border: 'none' }}
+              title="Delete Lab"
+            >
+              <FiTrash2 size={14} />
+            </button>
+          )}
         </div>
         <StatusIndicator state={labState} />
       </div>

@@ -10,7 +10,7 @@ from .state.pc_state_manager import PCStateManager
 from .ws.manager import ConnectionManager
 from .tcp.server import start_tcp_server
 
-from .routes import auth, labs, pcs, software, timetable, damage_reports, ws
+from .routes import auth, labs, pcs, software, timetable, damage_reports, ws, pc_registration
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -93,6 +93,7 @@ app.include_router(software.router)
 app.include_router(timetable.router)
 app.include_router(damage_reports.router)
 app.include_router(ws.router)
+app.include_router(pc_registration.router)
 
 @app.get("/health")
 async def health_check():

@@ -52,7 +52,7 @@ CREATE TABLE labs (
 
 CREATE TABLE pcs (
     pc_id              TEXT PRIMARY KEY,
-    lab_id             TEXT REFERENCES labs(lab_id),
+    lab_id             TEXT REFERENCES labs(lab_id) ON DELETE CASCADE,
     current_state      pc_state_enum DEFAULT 'AVAILABLE',
     is_maintenance     BOOLEAN DEFAULT FALSE,
     last_heartbeat_at  TIMESTAMPTZ,
@@ -61,7 +61,7 @@ CREATE TABLE pcs (
 
 CREATE TABLE state_transitions (
     id              SERIAL PRIMARY KEY,
-    pc_id           TEXT REFERENCES pcs(pc_id),
+    pc_id           TEXT REFERENCES pcs(pc_id) ON DELETE CASCADE,
     from_state      pc_state_enum,
     to_state        pc_state_enum,
     transitioned_at TIMESTAMPTZ DEFAULT now()
