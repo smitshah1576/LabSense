@@ -40,6 +40,21 @@ class ConnectionManager:
         }
         await self.broadcast(message)
 
+    async def broadcast_pc_heartbeat(self, pc_id: str, state: str,
+                                      session_active: bool, screen_locked: bool,
+                                      idle_seconds: int, cpu_percent: float):
+        """Broadcast full telemetry snapshot for a PC on every heartbeat."""
+        message = {
+            "type": "pc_update",
+            "pc_id": pc_id,
+            "state": state,
+            "session_active": session_active,
+            "screen_locked": screen_locked,
+            "idle_seconds": idle_seconds,
+            "cpu_percent": cpu_percent,
+        }
+        await self.broadcast(message)
+
     async def broadcast_lab_update(self, lab_id: str, lab_state: LabState):
         message = {
             "type": "lab_update",

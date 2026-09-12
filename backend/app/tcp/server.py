@@ -64,13 +64,24 @@ async def handle_agent_connection(reader: asyncio.StreamReader, writer: asyncio.
                 continue  # silently drop messages from unregistered PCs
                 
             if msg_type == "HEARTBEAT":
-                await state_manager.handle_heartbeat(
+                transition = await state_manager.handle_heartbeat(
                     pc_id=pc_id,
                     session_active=msg.get("session_active", False),
                     screen_locked=msg.get("screen_locked", False),
                     idle_seconds=msg.get("idle_seconds", 0),
                     cpu_percent=msg.get("cpu_percent", 0.0)
                 )
+                # Broadcast full telemetry to all WS clients on every heartbeat
+                live = await state_manager.get_state(pc_id)
+                if live:
+                    await ws_manager.broadcast_pc_heartbeat(
+                        pc_id=pc_id,
+                        state=live.current_state.value,
+                        session_active=live.session_active,
+                        screen_locked=live.screen_locked,
+                        idle_seconds=live.idle_seconds,
+                        cpu_percent=live.cpu_percent,
+                    )
             elif msg_type == "GOING_TO_SLEEP":
                 await state_manager.handle_going_to_sleep(pc_id)
             elif msg_type == "SOFTWARE_REPORT":

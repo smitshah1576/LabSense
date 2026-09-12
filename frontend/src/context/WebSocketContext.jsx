@@ -59,6 +59,7 @@ export const WebSocketProvider = ({ children }) => {
                     session_active: pc.session_active,
                     screen_locked: pc.screen_locked,
                     cpu_percent: pc.cpu_percent,
+                    idle_seconds: pc.idle_seconds,
                     last_heartbeat_at: new Date().toISOString(),
                   }
                 })
@@ -70,6 +71,10 @@ export const WebSocketProvider = ({ children }) => {
                 [data.pc_id]: {
                   ...(prev[data.pc_id] || {}),
                   status: data.state,
+                  session_active: data.session_active !== undefined ? data.session_active : (prev[data.pc_id]?.session_active),
+                  screen_locked: data.screen_locked !== undefined ? data.screen_locked : (prev[data.pc_id]?.screen_locked),
+                  cpu_percent: data.cpu_percent !== undefined ? data.cpu_percent : (prev[data.pc_id]?.cpu_percent),
+                  idle_seconds: data.idle_seconds !== undefined ? data.idle_seconds : (prev[data.pc_id]?.idle_seconds),
                   last_heartbeat_at: new Date().toISOString(),
                 },
               }))

@@ -241,7 +241,15 @@ async def _run() -> None:
     )
 
     # --- Acquire inhibitor lock (before first sleep event) ---
-    await inhibitor.acquire()
+    try:
+        await asyncio.wait_for(inhibitor.acquire(), timeout=5.0)
+    except asyncio.TimeoutError:
+        logger.warning(
+            'Inhibitor lock acquisition timed out after 5s — '
+            'continuing without sleep inhibitor (D-Bus may be unresponsive)'
+        )
+    except Exception:
+        logger.exception('Failed to acquire inhibitor lock — continuing without it')
 
     # --- Establish initial TCP connection ---
     await heartbeat_client.connect()

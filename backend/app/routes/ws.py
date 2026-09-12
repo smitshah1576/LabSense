@@ -29,7 +29,8 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
                     "state": state.current_state.value if hasattr(state.current_state, 'value') else str(state.current_state),
                     "session_active": state.session_active,
                     "screen_locked": state.screen_locked,
-                    "cpu_percent": state.cpu_percent
+                    "cpu_percent": state.cpu_percent,
+                    "idle_seconds": state.idle_seconds
                 }
                 for pc_id, state in states.items()
             ]

@@ -63,13 +63,21 @@ class HeartbeatClient:
         expected to retry.
         """
         try:
-            self._reader, self._writer = await asyncio.open_connection(
-                self._host, self._port
+            self._reader, self._writer = await asyncio.wait_for(
+                asyncio.open_connection(self._host, self._port),
+                timeout=10.0,
             )
             self._connected = True
             self._backoff = config.RECONNECT_DELAY  # reset on success
             logger.info(
                 'Connected to backend at %s:%d', self._host, self._port
+            )
+        except asyncio.TimeoutError:
+            self._connected = False
+            logger.error(
+                'Connection to %s:%d timed out after 10s — '
+                'check firewall and network reachability',
+                self._host, self._port,
             )
         except OSError as exc:
             self._connected = False
