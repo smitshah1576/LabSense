@@ -24,3 +24,12 @@ PC_ID: str = os.environ.get('LABSENSE_PC_ID', socket.gethostname())
 
 # Delay in seconds to wait before attempting to reconnect after connection loss
 RECONNECT_DELAY: float = float(os.environ.get('LABSENSE_RECONNECT_DELAY', '5.0'))
+
+# Root logging level. Set to DEBUG to see every individual heartbeat; at the
+# default INFO level only the first heartbeat after each (re)connect and a
+# periodic keep-alive summary are logged.
+LOG_LEVEL: str = os.environ.get('LABSENSE_LOG_LEVEL', 'INFO').upper()
+
+# Number of heartbeats between periodic INFO-level "still alive" log lines.
+# At the default 5s interval, 12 heartbeats is roughly one line per minute.
+HEARTBEAT_LOG_EVERY: int = int(os.environ.get('LABSENSE_HEARTBEAT_LOG_EVERY', '12'))

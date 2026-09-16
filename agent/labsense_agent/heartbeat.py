@@ -9,6 +9,10 @@ Connection management:
 - Reconnects automatically with exponential back-off on failure.
 - ``send_going_to_sleep()`` explicitly drains the write buffer so the
   inhibitor lock can be released with a guarantee that bytes hit the wire.
+- A background reader task consumes server-to-agent control messages.  The
+  protocol is bidirectional: the server replies with ``REJECTED`` when this
+  agent's ``pc_id`` is not registered, which would otherwise look exactly
+  like a healthy connection from the agent's side.
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ from .protocol import (
     create_heartbeat,
     create_software_report,
     encode_message,
+    read_message,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,6 +51,12 @@ class HeartbeatClient:
         self._writer: asyncio.StreamWriter | None = None
         self._connected = False
         self._backoff: float = config.RECONNECT_DELAY
+        self._reader_task: asyncio.Task | None = None
+        # Heartbeats sent on the current connection — drives the log cadence.
+        self._heartbeat_count = 0
+        # Set when the server explicitly rejects this pc_id, so the reconnect
+        # loop doesn't hide the reason behind a generic "connected" message.
+        self._rejected = False
 
     @property
     def connected(self) -> bool:
@@ -68,10 +79,13 @@ class HeartbeatClient:
                 timeout=10.0,
             )
             self._connected = True
+            self._heartbeat_count = 0
             self._backoff = config.RECONNECT_DELAY  # reset on success
             logger.info(
-                'Connected to backend at %s:%d', self._host, self._port
+                'Connected to backend at %s:%d (pc_id=%s)',
+                self._host, self._port, self._pc_id,
             )
+            self._start_reader()
         except asyncio.TimeoutError:
             self._connected = False
             logger.error(
@@ -84,6 +98,55 @@ class HeartbeatClient:
             logger.error(
                 'Failed to connect to %s:%d — %s', self._host, self._port, exc
             )
+
+    def _start_reader(self) -> None:
+        """Start the background task that consumes server-to-agent messages."""
+        if self._reader_task is not None and not self._reader_task.done():
+            self._reader_task.cancel()
+        self._reader_task = asyncio.create_task(
+            self._read_loop(), name='server-reader'
+        )
+
+    async def _read_loop(self) -> None:
+        """Consume control messages from the server until the stream closes.
+
+        The server is otherwise silent, so anything arriving here is a
+        deliberate control message and is worth logging loudly.
+        """
+        reader = self._reader
+        if reader is None:
+            return
+
+        try:
+            while True:
+                msg = await read_message(reader)
+                self._handle_server_message(msg)
+        except asyncio.CancelledError:
+            raise
+        except ConnectionError:
+            # Normal on disconnect — the heartbeat loop handles reconnection.
+            logger.debug('Server closed the connection')
+            self._connected = False
+        except Exception as exc:
+            logger.warning('Error reading from server: %s', exc)
+            self._connected = False
+
+    def _handle_server_message(self, msg: Dict[str, Any]) -> None:
+        """Act on one decoded server-to-agent control message."""
+        msg_type = msg.get('type')
+
+        if msg_type == 'REJECTED':
+            self._rejected = True
+            logger.error(
+                "Server rejected pc_id '%s': %s. This agent's heartbeats are "
+                'being discarded. Register the PC first (POST /admin/pcs, or '
+                'check the pcs table), then redeploy with a matching '
+                '--pc-id / LABSENSE_PC_ID.',
+                msg.get('pc_id', self._pc_id),
+                msg.get('reason', 'unknown reason'),
+            )
+        else:
+            logger.info('Received %s from server: %s', msg_type, msg)
 
     async def ensure_connected(self) -> bool:
         """Ensure the connection is alive, reconnecting if necessary.
@@ -156,8 +219,16 @@ class HeartbeatClient:
         )
         ok = await self._send(msg)
         if ok:
-            logger.debug(
-                'Heartbeat sent (cpu=%.1f%%, idle=%ds, active=%s, locked=%s)',
+            self._heartbeat_count += 1
+            # Log the first heartbeat on each connection, then roughly one per
+            # minute, at INFO — enough to prove liveness in `journalctl`
+            # without flooding it. Everything else stays at DEBUG.
+            first = self._heartbeat_count == 1
+            periodic = self._heartbeat_count % config.HEARTBEAT_LOG_EVERY == 0
+            log = logger.info if (first or periodic) else logger.debug
+            log(
+                'Heartbeat #%d sent (cpu=%.1f%%, idle=%ds, active=%s, locked=%s)',
+                self._heartbeat_count,
                 cpu_percent,
                 idle_seconds,
                 session_active,
@@ -210,6 +281,11 @@ class HeartbeatClient:
     async def close(self) -> None:
         """Gracefully close the TCP connection."""
         self._connected = False
+
+        if self._reader_task is not None:
+            self._reader_task.cancel()
+            self._reader_task = None
+
         if self._writer is not None:
             try:
                 self._writer.close()

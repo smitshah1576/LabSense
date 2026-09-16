@@ -153,6 +153,38 @@ async def _heartbeat_loop(client: HeartbeatClient) -> None:
         await asyncio.sleep(config.HEARTBEAT_INTERVAL)
 
 
+async def _dbus_supervisor(monitor: LogindMonitor) -> None:
+    """Keep the D-Bus listener alive for the lifetime of the agent.
+
+    ``connect_and_listen()`` returns whenever the bus disconnects and raises if
+    it can't connect at all (no logind, D-Bus restarted, running on a machine
+    without a system bus).  Neither case should take the agent down with it —
+    losing sleep/lock events is a degradation, but losing the heartbeat is a
+    PC vanishing from the dashboard.  So supervise and retry indefinitely.
+    """
+    backoff = config.RECONNECT_DELAY
+
+    while True:
+        try:
+            await monitor.connect_and_listen()
+            # Returned normally — the bus disconnected.
+            logger.warning('D-Bus listener stopped; restarting in %.1fs', backoff)
+        except asyncio.CancelledError:
+            logger.info('D-Bus supervisor cancelled')
+            raise
+        except Exception as exc:
+            logger.error(
+                'D-Bus listener failed (%s) — retrying in %.1fs. '
+                'Sleep/lock events are unavailable until it recovers; '
+                'heartbeats are unaffected.',
+                exc, backoff,
+            )
+
+        await monitor.disconnect()
+        await asyncio.sleep(backoff)
+        backoff = min(backoff * 2, 60.0)
+
+
 async def _software_scan_loop(client: HeartbeatClient) -> None:
     """Periodically scan installed software and send SOFTWARE_REPORT.
 
@@ -263,7 +295,7 @@ async def _run() -> None:
         _heartbeat_loop(heartbeat_client), name='heartbeat'
     )
     dbus_task = asyncio.create_task(
-        logind_monitor.connect_and_listen(), name='dbus-monitor'
+        _dbus_supervisor(logind_monitor), name='dbus-monitor'
     )
     software_task = asyncio.create_task(
         _software_scan_loop(heartbeat_client), name='software-scan'
@@ -274,11 +306,17 @@ async def _run() -> None:
 
     logger.info('All tasks started — agent is running')
 
-    # Wait until *any* task finishes (crash) or shutdown is signalled.
+    # Only the heartbeat task and an explicit shutdown are terminal.  The
+    # D-Bus and software-scan tasks are supervised and expected to outlive
+    # transient failures; letting either end the agent was how a D-Bus hiccup
+    # turned into a silent exit(0) that systemd's Restart=on-failure ignored.
     done, pending = await asyncio.wait(
-        [heartbeat_task, dbus_task, software_task, shutdown_task],
+        [heartbeat_task, shutdown_task],
         return_when=asyncio.FIRST_COMPLETED,
     )
+
+    # Fold the supervised tasks back in so the cleanup below cancels them.
+    pending |= {dbus_task, software_task}
 
     # --- Graceful cleanup ---
     logger.info('Shutting down …')
@@ -311,7 +349,7 @@ async def _run() -> None:
 def main() -> None:
     """Synchronous entry point."""
     logging.basicConfig(
-        level=logging.INFO,
+        level=getattr(logging, config.LOG_LEVEL, logging.INFO),
         format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
     )

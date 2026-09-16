@@ -30,6 +30,17 @@ class PCStateManager:
         """Set callback called on state transitions: callback(pc_id, old_state, new_state)"""
         self._on_transition = callback
     
+    async def _notify(self, transition: Optional[tuple[PCState, PCState]], pc_id: str) -> None:
+        """Fire the transition callback, if any.
+
+        Deliberately called *after* releasing ``self._lock``: the callback
+        writes to Postgres and fans out to every connected WebSocket, and one
+        slow browser must not stall heartbeat processing for every other PC.
+        """
+        if transition and self._on_transition:
+            old_state, new_state = transition
+            await self._on_transition(pc_id, old_state, new_state)
+
     async def handle_heartbeat(self, pc_id: str, session_active: bool, screen_locked: bool,
                                 idle_seconds: int, cpu_percent: float) -> Optional[tuple[PCState, PCState]]:
         """Process a heartbeat. Returns (old_state, new_state) if a transition occurred, else None."""
@@ -68,13 +79,12 @@ class PCStateManager:
             
             state.current_state = new_state
             self._reset_staleness_timer(pc_id)
-            
-            if old_state != new_state:
-                if self._on_transition:
-                    await self._on_transition(pc_id, old_state, new_state)
-                return (old_state, new_state)
-            return None
-    
+
+            transition = (old_state, new_state) if old_state != new_state else None
+
+        await self._notify(transition, pc_id)
+        return transition
+
     async def handle_going_to_sleep(self, pc_id: str) -> Optional[tuple[PCState, PCState]]:
         """Process a GOING_TO_SLEEP message."""
         async with self._lock:
@@ -84,21 +94,23 @@ class PCStateManager:
             state = self._states[pc_id]
             if state.current_state == PCState.MAINTENANCE:
                 return None
-            
+
             old_state = state.current_state
             state.current_state = PCState.AVAILABLE_SLEEP
-            
+
             # Cancel staleness timer — sleep is a known state
             if state.staleness_task:
                 state.staleness_task.cancel()
                 state.staleness_task = None
-            
-            if old_state != PCState.AVAILABLE_SLEEP:
-                if self._on_transition:
-                    await self._on_transition(pc_id, old_state, PCState.AVAILABLE_SLEEP)
-                return (old_state, PCState.AVAILABLE_SLEEP)
-            return None
-    
+
+            transition = (
+                (old_state, PCState.AVAILABLE_SLEEP)
+                if old_state != PCState.AVAILABLE_SLEEP else None
+            )
+
+        await self._notify(transition, pc_id)
+        return transition
+
     async def set_maintenance(self, pc_id: str, is_maintenance: bool) -> Optional[tuple[PCState, PCState]]:
         """Toggle maintenance mode."""
         async with self._lock:
@@ -113,13 +125,15 @@ class PCStateManager:
             else:
                 # When clearing maintenance, default to AVAILABLE
                 state.current_state = PCState.AVAILABLE
-            
-            if old_state != state.current_state:
-                if self._on_transition:
-                    await self._on_transition(pc_id, old_state, state.current_state)
-                return (old_state, state.current_state)
-            return None
-    
+
+            transition = (
+                (old_state, state.current_state)
+                if old_state != state.current_state else None
+            )
+
+        await self._notify(transition, pc_id)
+        return transition
+
     def _reset_staleness_timer(self, pc_id: str):
         """Reset the heartbeat staleness timer for a PC."""
         state = self._states.get(pc_id)
@@ -135,14 +149,18 @@ class PCStateManager:
         """After HEARTBEAT_TIMEOUT_SECONDS without a heartbeat, mark PC as AVAILABLE."""
         try:
             await asyncio.sleep(settings.HEARTBEAT_TIMEOUT_SECONDS)
+
+            transition = None
             async with self._lock:
                 state = self._states.get(pc_id)
                 if state and state.current_state not in (PCState.MAINTENANCE, PCState.AVAILABLE_SLEEP):
                     old_state = state.current_state
                     state.current_state = PCState.AVAILABLE
                     logger.warning(f'PC {pc_id} heartbeat stale after {settings.HEARTBEAT_TIMEOUT_SECONDS}s, marking AVAILABLE')
-                    if old_state != PCState.AVAILABLE and self._on_transition:
-                        await self._on_transition(pc_id, old_state, PCState.AVAILABLE)
+                    if old_state != PCState.AVAILABLE:
+                        transition = (old_state, PCState.AVAILABLE)
+
+            await self._notify(transition, pc_id)
         except asyncio.CancelledError:
             pass  # Timer was reset by a new heartbeat
     

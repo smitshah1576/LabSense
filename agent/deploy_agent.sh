@@ -12,6 +12,7 @@ set -e
 SERVER_HOST=""
 SERVER_PORT="9000"
 PC_ID=""
+LOG_LEVEL="INFO"
 INSTALL_DIR="/opt/labsense-agent"
 VENV_DIR="$INSTALL_DIR/.venv"
 
@@ -48,8 +49,12 @@ while [[ $# -gt 0 ]]; do
             PC_ID="$2"
             shift 2
             ;;
+        --log-level)
+            LOG_LEVEL="$2"
+            shift 2
+            ;;
         -h|--help)
-            echo "Usage: sudo $0 [--server-host <IP>] [--server-port <PORT>] [--pc-id <PC_ID>]"
+            echo "Usage: sudo $0 [--server-host <IP>] [--server-port <PORT>] [--pc-id <PC_ID>] [--log-level DEBUG|INFO]"
             exit 0
             ;;
         *)
@@ -81,6 +86,10 @@ echo "  - Virtual Environment: $VENV_DIR"
 echo "  - Server Host       : $SERVER_HOST"
 echo "  - Server Port       : $SERVER_PORT"
 echo "  - PC Identifier     : $PC_ID"
+echo "  - Log Level         : $LOG_LEVEL"
+echo ""
+echo -e "${YELLOW}NOTE:${NC} the PC Identifier must already exist in the server's 'pcs' table."
+echo "      Heartbeats from an unregistered pc_id are rejected by the server."
 echo ""
 
 # 1. Create installation directory
@@ -130,9 +139,13 @@ User=labsense
 Environment=LABSENSE_SERVER_HOST=$SERVER_HOST
 Environment=LABSENSE_SERVER_PORT=$SERVER_PORT
 Environment=LABSENSE_PC_ID=$PC_ID
+Environment=LABSENSE_LOG_LEVEL=$LOG_LEVEL
 ExecStart=$VENV_DIR/bin/python3 -m labsense_agent.main
 WorkingDirectory=$INSTALL_DIR
-Restart=on-failure
+# 'always', not 'on-failure': a clean exit(0) is still an agent that stopped
+# reporting, and a PC silently vanishing from the dashboard is the failure
+# mode this service exists to prevent.
+Restart=always
 RestartSec=5
 
 [Install]

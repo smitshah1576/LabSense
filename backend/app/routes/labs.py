@@ -1,13 +1,42 @@
 """Lab routes — list labs, get lab detail, get lab state."""
 
-from datetime import datetime, timezone
+import logging
+from datetime import datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from fastapi import APIRouter, Depends, Request, HTTPException
+from ..config import settings
 from ..models.schemas import LabResponse
 from ..models.enums import PCState
 from ..auth.dependencies import get_current_user
 from ..state.lab_state import compute_lab_state
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/labs", tags=["labs"])
+
+
+def _local_now() -> datetime:
+    """Current time in the configured local zone.
+
+    Lab operating hours and timetable slots are local wall-clock times. Using
+    UTC here made every lab read CLOSED for the whole working day (09:00 IST
+    is 03:30 UTC, outside the 08:00-20:00 window) and meant no timetable slot
+    ever matched.
+
+    Windows has no system tz database, so an unresolvable zone falls back to
+    the host's own local time rather than failing the request — wrong only if
+    the server's clock isn't set to the lab's timezone.
+    """
+    try:
+        return datetime.now(ZoneInfo(settings.TIMEZONE))
+    except (ZoneInfoNotFoundError, ValueError):
+        logger.warning(
+            "Timezone %r unavailable (install the 'tzdata' package on Windows) "
+            "— falling back to the server's local time",
+            settings.TIMEZONE,
+        )
+        return datetime.now()
 
 
 async def _enrich_lab(lab_row, conn, state_manager, now) -> dict:
@@ -66,7 +95,7 @@ async def get_labs(
     """List all labs with computed state."""
     pool = request.app.state.db_pool
     state_manager = request.app.state.pc_state_manager
-    now = datetime.now(timezone.utc)
+    now = _local_now()
 
     async with pool.acquire() as conn:
         labs = await conn.fetch(
@@ -88,7 +117,7 @@ async def get_lab(
     """Get a single lab with computed state."""
     pool = request.app.state.db_pool
     state_manager = request.app.state.pc_state_manager
-    now = datetime.now(timezone.utc)
+    now = _local_now()
 
     async with pool.acquire() as conn:
         lab = await conn.fetchrow(
@@ -109,7 +138,7 @@ async def get_lab_state(
     """Get just the lab state (Open/Occupied/Closed)."""
     pool = request.app.state.db_pool
     state_manager = request.app.state.pc_state_manager
-    now = datetime.now(timezone.utc)
+    now = _local_now()
 
     async with pool.acquire() as conn:
         lab = await conn.fetchrow(

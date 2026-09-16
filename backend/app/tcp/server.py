@@ -53,16 +53,25 @@ async def handle_agent_connection(reader: asyncio.StreamReader, writer: asyncio.
                         "SELECT 1 FROM pcs WHERE pc_id = $1", pc_id
                     )
                 validated_pcs[pc_id] = row is not None
-                if not validated_pcs[pc_id]:
-                    logger.warning(
-                        "Rejected unregistered pc_id '%s' from %s — "
-                        "register it via POST /admin/pcs first",
-                        pc_id, addr,
-                    )
 
             if not validated_pcs[pc_id]:
-                continue  # silently drop messages from unregistered PCs
-                
+                # Tell the agent why, then hang up. Dropping these silently
+                # made a misconfigured pc_id indistinguishable from a healthy
+                # connection on the agent side — it logged a successful send
+                # every 5s while nothing reached the dashboard.
+                logger.error(
+                    "Rejecting unregistered pc_id '%s' from %s - "
+                    "register it via POST /admin/pcs first",
+                    pc_id, addr,
+                )
+                writer.write(encode_message({
+                    "type": "REJECTED",
+                    "pc_id": pc_id,
+                    "reason": "pc_id is not registered in the pcs table",
+                }))
+                await writer.drain()
+                break
+
             if msg_type == "HEARTBEAT":
                 transition = await state_manager.handle_heartbeat(
                     pc_id=pc_id,
@@ -87,9 +96,12 @@ async def handle_agent_connection(reader: asyncio.StreamReader, writer: asyncio.
             elif msg_type == "SOFTWARE_REPORT":
                 packages = msg.get("packages", [])
                 async with pool.acquire() as conn:
+                    # The pool registers a jsonb codec (see database.py), so
+                    # the list is encoded here — passing a pre-dumped string
+                    # would double-encode it.
                     await conn.execute(
                         "UPDATE pcs SET installed_software = $1::jsonb WHERE pc_id = $2",
-                        json.dumps(packages), pc_id
+                        packages, pc_id
                     )
     except Exception as e:
         logger.error(f"Error handling agent connection {addr}: {e}")

@@ -1,10 +1,38 @@
 """Software search routes — global and lab-wise software discovery."""
 
+import json
+
 from fastapi import APIRouter, Depends, Query, Request
 from ..models.schemas import SoftwareSearchResult
 from ..auth.dependencies import get_current_user
 
 router = APIRouter(tags=["software"])
+
+
+def _as_package_list(value) -> list[str]:
+    """Normalise an ``installed_software`` column value to a list of names.
+
+    The pool registers a jsonb codec so this is normally already a list, but
+    rows written before that codec existed hold a double-encoded JSON string.
+    Iterating one of those yields single characters, so decode it here rather
+    than returning nonsense matches.
+    """
+    if not value:
+        return []
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (ValueError, TypeError):
+            return []
+    if isinstance(value, list):
+        return [str(pkg) for pkg in value]
+    return []
+
+
+def _matching_packages(value, query: str) -> list[str]:
+    """Return the package names in ``value`` that contain ``query``."""
+    needle = query.lower()
+    return [pkg for pkg in _as_package_list(value) if needle in pkg.lower()]
 
 
 @router.get("/software/search", response_model=list[SoftwareSearchResult])
@@ -32,11 +60,7 @@ async def search_software_global(
 
         results = []
         for row in rows:
-            # Extract matching package names
-            matching = [
-                pkg for pkg in (row["installed_software"] or [])
-                if q.lower() in pkg.lower()
-            ]
+            matching = _matching_packages(row["installed_software"], q)
             results.append(SoftwareSearchResult(
                 pc_id=row["pc_id"],
                 lab_id=row["lab_id"],
@@ -73,10 +97,7 @@ async def search_software_lab(
 
         results = []
         for row in rows:
-            matching = [
-                pkg for pkg in (row["installed_software"] or [])
-                if q.lower() in pkg.lower()
-            ]
+            matching = _matching_packages(row["installed_software"], q)
             results.append(SoftwareSearchResult(
                 pc_id=row["pc_id"],
                 lab_id=row["lab_id"],

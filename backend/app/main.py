@@ -36,17 +36,30 @@ async def lifespan(app: FastAPI):
         try:
             # Broadcast to WS
             await ws_manager.broadcast_pc_update(pc_id, new_state)
-            
-            # Write to DB
+
+            old_value = old_state.value if hasattr(old_state, 'value') else str(old_state)
+            new_value = new_state.value if hasattr(new_state, 'value') else str(new_state)
+
+            # Write to DB — still on transition only, never per heartbeat.
             async with pool.acquire() as conn:
                 await conn.execute(
                     """
                     INSERT INTO state_transitions (pc_id, from_state, to_state)
                     VALUES ($1, $2, $3)
                     """,
-                    pc_id, 
-                    old_state.value if hasattr(old_state, 'value') else str(old_state),
-                    new_state.value if hasattr(new_state, 'value') else str(new_state)
+                    pc_id, old_value, new_value
+                )
+                # Keep the pcs row in step with the in-memory store, so the
+                # dashboard still shows something sensible after a restart
+                # and last_heartbeat_at isn't permanently NULL.
+                await conn.execute(
+                    """
+                    UPDATE pcs
+                    SET current_state = $2::pc_state_enum,
+                        last_heartbeat_at = now()
+                    WHERE pc_id = $1
+                    """,
+                    pc_id, new_value
                 )
         except Exception as e:
             logger.error(f"Error in transition callback for PC {pc_id}: {e}")

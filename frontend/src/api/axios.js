@@ -1,6 +1,11 @@
 import axios from 'axios'
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+// Fall back to the host the dashboard itself was loaded from, not a literal
+// "localhost" — otherwise a browser on any machine other than the backend's
+// tries to reach its own port 8000 and every request fails.
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL ||
+  `${window.location.protocol}//${window.location.hostname}:8000`
 
 const api = axios.create({
   baseURL: API_BASE_URL,

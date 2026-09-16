@@ -23,7 +23,10 @@ export const WebSocketProvider = ({ children }) => {
 
     const getWsUrl = () => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const host = import.meta.env.VITE_WS_URL || 'localhost:8000'
+      // Same reasoning as api/axios.js: default to the host serving the
+      // dashboard so this works over the LAN without configuration.
+      const host =
+        import.meta.env.VITE_WS_URL || `${window.location.hostname}:8000`
       const cleanHost = host.replace(/^wss?:\/\//, '')
       return `${protocol}//${cleanHost}/ws?token=${token}`
     }

@@ -11,7 +11,7 @@ Environment=LABSENSE_SERVER_PORT=9000
 Environment=LABSENSE_PC_ID=lab-a-pc-1
 ExecStart=/opt/labsense-agent/.venv/bin/python3 -m labsense_agent.main
 WorkingDirectory=/opt/labsense-agent
-Restart=on-failure
+Restart=always
 RestartSec=5
 
 [Install]
