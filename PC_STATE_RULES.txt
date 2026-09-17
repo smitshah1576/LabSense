@@ -1,0 +1,681 @@
+===============================================================================
+ LabSense - PC State & Telemetry Attribute Rules
+ When and how each attribute updates (or doesn't) from agent to dashboard
+===============================================================================
+
+This describes what the code ACTUALLY does today, not the intended design.
+Where the two differ, the entry is marked  [QUIRK]  and says so explicitly.
+
+Contents
+  1. The pipeline at a glance
+  2. Timing constants
+  3. Attribute: cpu_percent        (CPU Load)
+  4. Attribute: idle_seconds       (Idle Time)
+  5. Attribute: session_active     (Session)
+  6. Attribute: screen_locked      (Screen)
+  7. Attribute: current_state      (the 4-state PC status)
+  8. State transition table
+  9. Attribute: last_heartbeat_at  (Heartbeat)
+ 10. What the frontend receives and when
+ 11. How the frontend merges and displays values
+ 12. What does NOT update (frozen / stale values)
+ 13. Lab state (Open / Occupied / Closed)
+ 14. Scenario walk-throughs
+ 15. Summary of quirks
+
+
+-------------------------------------------------------------------------------
+1. THE PIPELINE AT A GLANCE
+-------------------------------------------------------------------------------
+
+  Ubuntu PC                    Windows server                        Browser
+  ---------                    --------------                        -------
+  agent collects 4 values
+    (cpu, idle, session, lock)
+        |
+        | every ~5s: HEARTBEAT frame over raw TCP :9000
+        v
+                     tcp/server.py  -- validates pc_id against pcs table
+                           |           (unregistered -> REJECTED, disconnect)
+                           v
+                     PCStateManager.handle_heartbeat()
+                       - stores the 4 telemetry values in memory
+                       - derives current_state
+                       - restarts the 15s staleness timer
+                           |
+                           |-- if state CHANGED --> on_transition():
+                           |        a) WS broadcast  {pc_update, state only}
+                           |        b) INSERT state_transitions
+                           |        c) UPDATE pcs.current_state, last_heartbeat_at
+                           |
+                           '-- ALWAYS --> WS broadcast {pc_update, state + all 4 values}
+                                                  |
+                                                  v
+                                       WebSocketContext.jsx (pcStates)
+                                                  |
+                                       LabDetailPage merges with REST data
+                                                  |
+                                               PCCard renders
+
+Key principle: the SERVER decides the state. The agent only reports raw
+telemetry; it never sends a state name (except the GOING_TO_SLEEP event).
+The browser never computes a state either - it only displays what it is told.
+
+
+-------------------------------------------------------------------------------
+2. TIMING CONSTANTS
+-------------------------------------------------------------------------------
+
+ Constant                    Default  Where set                       Env override
+ --------------------------  -------  ------------------------------  ----------------------------------
+ Heartbeat interval          5.0 s    agent/labsense_agent/config.py  LABSENSE_HEARTBEAT_INTERVAL
+ Staleness grace period      15 s     backend/app/config.py           LABSENSE_HEARTBEAT_TIMEOUT_SECONDS
+ Idle threshold              300 s    backend/app/config.py           LABSENSE_IDLE_THRESHOLD_SECONDS
+ CPU threshold               5.0 %    backend/app/config.py           LABSENSE_CPU_THRESHOLD_PERCENT
+ Software scan interval      300 s    agent config.py                 LABSENSE_SOFTWARE_SCAN_INTERVAL
+ Agent reconnect back-off    5s, 10s, 20s, 40s, 60s (cap); resets after a successful connect
+ Browser WS reconnect delay  3 s      frontend WebSocketContext.jsx   (none)
+ Telemetry probe timeout     5 s each (up to 3 probes per heartbeat)
+
+ IMPORTANT: the thresholds live on the SERVER. Changing them on the agent does
+ nothing. Restart the backend after changing them.
+
+ Real heartbeat period = 5 s sleep + time spent collecting telemetry.
+ Normally ~5.1 s. The agent sleeps AFTER sending, so slow probes stretch the
+ period. [QUIRK] Worst case all three subprocess probes hit their 5 s timeout,
+ giving a ~20 s period - longer than the 15 s grace period, so the card would
+ flicker to Available between heartbeats.
+
+
+-------------------------------------------------------------------------------
+3. ATTRIBUTE: cpu_percent   (card label: "CPU Load")
+-------------------------------------------------------------------------------
+
+ SOURCE (agent)
+   psutil.cpu_percent(interval=None)            telemetry.py: get_cpu_percent()
+   - System-wide CPU utilisation, all cores averaged, 0.0 - 100.0.
+   - interval=None means "average since the previous call", so each value is
+     the average over the ~5 s since the last heartbeat. It is NOT an
+     instantaneous reading, and it never blocks the event loop.
+   - The agent calls it once at startup purely to prime the counter.
+   - Rounded to 1 decimal place before sending (protocol.py).
+
+ [QUIRK] The first heartbeat's CPU value covers only the few milliseconds
+         between priming and sending, so it is often 0.0 or a random spike.
+         From the second heartbeat on it is meaningful.
+
+ WHEN IT UPDATES
+   Every heartbeat (~5 s), unconditionally - including while the PC is in
+   MAINTENANCE.
+
+ EFFECT ON STATE
+   cpu_percent > 5.0 (strictly greater) counts as "activity" for IN_USE,
+   but ONLY if session_active is true. See section 7.
+
+ SERVER DEFAULT if the field is missing from the message: 0.0
+
+ FRONTEND DISPLAY
+   cpu.toFixed(1) + "%"   e.g. "42.0%". Shows "0.0%" if never received.
+
+
+-------------------------------------------------------------------------------
+4. ATTRIBUTE: idle_seconds   (card label: "Idle Time")
+-------------------------------------------------------------------------------
+
+ SOURCE (agent)                                  telemetry.py: get_idle_seconds()
+   Tried in order, first success wins:
+   1. `xprintidle`  -> milliseconds since last X11 keyboard/mouse input, // 1000
+   2. Newest mtime among /dev/input/event*  -> now - mtime
+   3. Give up       -> 0
+
+ [QUIRK - IMPORTANT] Under the systemd deployment this value is unreliable:
+   - The service runs as the `labsense` system user with no DISPLAY or
+     XAUTHORITY, so xprintidle cannot talk to the logged-in user's X server
+     and method 1 fails.
+   - Method 2 is broken in principle: device-node mtimes do NOT change when
+     you type or move the mouse. It effectively reports seconds since boot.
+   - If both fail, 0 is sent, which the server reads as "just active".
+   Running the agent in the foreground as the logged-in desktop user (with
+   xprintidle installed) gives correct values.
+   Also: xprintidle is X11-only. On a Wayland session it fails even when run
+   as the logged-in user.
+
+ WHEN IT UPDATES
+   Every heartbeat (~5 s), unconditionally. It is sampled - the card jumps
+   in ~5 s steps rather than counting up smoothly, because the browser has
+   no timer of its own.
+
+ EFFECT ON STATE
+   idle_seconds < 300 (strictly less) counts as "activity" for IN_USE,
+   but ONLY if session_active is true.
+
+ SERVER DEFAULT if missing: 0   (note: 0 means "active", not "unknown")
+
+ FRONTEND DISPLAY
+   0 or negative  -> "0s"
+   < 60           -> "42s"
+   >= 60          -> "5m 12s"   (no hours: 2 hours shows as "120m 0s")
+
+
+-------------------------------------------------------------------------------
+5. ATTRIBUTE: session_active   (card label: "Session")
+-------------------------------------------------------------------------------
+
+ SOURCE (agent)                                  telemetry.py: get_session_active()
+   len(psutil.users()) > 0
+   psutil.users() reads the utmp login records - the same list `who` shows.
+
+ What counts as a session:
+   - A local graphical or console login          -> true (usually)
+   - An SSH login from another machine           -> true   [QUIRK]
+   - A tmux/screen session left running          -> can be true
+   - Login screen showing, nobody logged in      -> false
+
+ [QUIRK] Some Wayland display managers do not write a utmp record for the
+         graphical session. Run `who` on the demo machines while logged in -
+         if your desktop login doesn't appear there, session_active will be
+         false and the PC will never show IN_USE.
+
+ This is NOT sourced from logind/D-Bus, despite the architecture doc's
+ framing. Only lock and sleep/shutdown events come from logind.
+
+ WHEN IT UPDATES
+   Every heartbeat (~5 s), unconditionally.
+
+ EFFECT ON STATE
+   This is the gate. If false, the PC is AVAILABLE no matter what CPU, idle
+   time or lock state say.
+
+ SERVER DEFAULT if missing: false
+
+ FRONTEND DISPLAY
+   true -> "Active" (green icon)     false -> "No User" (grey icon)
+
+
+-------------------------------------------------------------------------------
+6. ATTRIBUTE: screen_locked   (card label: "Screen")
+-------------------------------------------------------------------------------
+
+ SOURCE (agent) - two independent sources, OR'ed together:
+
+   screen_locked = probe_result  OR  logind_flag           (main.py heartbeat loop)
+
+   probe_result - polled on every heartbeat          telemetry.py: get_screen_locked()
+     1. `xdg-screensaver status`  -> "enabled" = locked
+     2. `dbus-send --session ... org.freedesktop.ScreenSaver.GetActive`
+     3. Give up -> false
+
+   logind_flag - event-driven, a module global in main.py
+     set True  on the logind Session `Lock` D-Bus signal
+     set False on the logind Session `Unlock` D-Bus signal
+
+ [QUIRK] Under the systemd deployment both sources are weak:
+   - The probe needs the user's session bus / display; the system user has
+     neither, so it returns false.
+   - logind only emits Lock/Unlock when something calls LockSession
+     (e.g. `loginctl lock-session`). GNOME's own lock screen typically sets
+     the session's LockedHint property instead and may emit no signal.
+   Test both `loginctl lock-session` and locking from the desktop UI.
+
+ [QUIRK] Because of the OR, if the agent receives a Lock signal but misses
+         the matching Unlock (e.g. the D-Bus listener was restarting at that
+         moment), screen_locked stays true until the next Unlock signal or an
+         agent restart.
+
+ [QUIRK] The Lock/Unlock match rule is not filtered to one session - a lock
+         signal for ANY session on the machine sets the flag.
+
+ WHEN IT UPDATES
+   Sent on every heartbeat. The logind flag itself changes instantly when the
+   signal arrives, but it is only transmitted with the NEXT heartbeat - so the
+   dashboard lags a lock by up to ~5 s. No message is sent on lock alone.
+
+ EFFECT ON STATE
+   screen_locked = true counts as "activity" for IN_USE (a locked PC is
+   considered occupied - someone stepped away), ONLY if session_active.
+   There is no timeout: a PC locked for 8 hours stays IN_USE.
+   (Open design question - see md_files/progress.md.)
+
+ SERVER DEFAULT if missing: false
+
+ FRONTEND DISPLAY
+   true -> "Locked" (lock icon)      false -> "Unlocked"
+
+
+-------------------------------------------------------------------------------
+7. ATTRIBUTE: current_state   (card badge + colour)
+-------------------------------------------------------------------------------
+
+ Computed ONLY on the server, in backend/app/state/pc_state_manager.py.
+ Four values: AVAILABLE, IN_USE, AVAILABLE_SLEEP, MAINTENANCE
+
+ 7.1  On every HEARTBEAT (handle_heartbeat)
+
+   Step 1. If current state is MAINTENANCE:
+             store the 4 telemetry values, restart the staleness timer,
+             DO NOT change state. Stop.
+   Step 2. Store the 4 telemetry values.
+   Step 3. Evaluate:
+
+             IN_USE  if   session_active
+                     AND (   idle_seconds  <  300
+                          OR cpu_percent   >  5.0
+                          OR screen_locked )
+             AVAILABLE    otherwise
+
+   Step 4. Restart the 15 s staleness timer.
+   Step 5. If the state differs from before -> transition (see section 1).
+
+   What this means:
+     - A heartbeat ALWAYS recomputes from scratch. It overrides
+       AVAILABLE_SLEEP (i.e. waking up) and any previous state. Only
+       MAINTENANCE is sticky.
+     - There is no hysteresis/debounce on the thresholds. CPU oscillating
+       around 5% with a long-idle, unlocked user flips the state on every
+       heartbeat.
+     - Evaluation uses only the current heartbeat - no averaging over time.
+
+ 7.2  On GOING_TO_SLEEP (handle_going_to_sleep)
+
+   Sent by the agent when logind emits PrepareForSleep(true) OR
+   PrepareForShutdown(true).
+     - If MAINTENANCE: ignored entirely.
+     - Otherwise: state -> AVAILABLE_SLEEP, staleness timer CANCELLED.
+   Telemetry values are not touched.
+
+   [QUIRK] A clean SHUTDOWN also sends GOING_TO_SLEEP, so a powered-off PC
+           shows "Sleep", not "Available". The architecture doc says a clean
+           shutdown should map to Available. Because the staleness timer is
+           cancelled, it stays "Sleep" until the machine boots and heartbeats.
+
+   [QUIRK] If the agent is not connected at the moment of suspend (or the
+           inhibitor lock isn't actually held - see progress.md Known Gaps),
+           no GOING_TO_SLEEP arrives. The staleness timer then fires and the
+           PC shows AVAILABLE instead of Sleep.
+
+ 7.3  On staleness timeout (_staleness_timeout)
+
+   Fires 15 s after the most recent heartbeat, unless a newer heartbeat has
+   restarted it.
+     - If MAINTENANCE or AVAILABLE_SLEEP: no change.
+     - Otherwise: state -> AVAILABLE.
+
+   Notes:
+     - The TCP connection closing does NOT itself change anything. A dropped
+       connection, a killed agent, `systemctl stop`, a pulled cable and a
+       crashed PC all look identical: silence, then AVAILABLE after 15 s.
+     - A 2-3 s network stutter never shows, because the next heartbeat
+       arrives within the window and restarts the timer. That is the point
+       of the grace period.
+     - The timer only exists for PCs that have sent at least one heartbeat
+       since the backend started.
+
+ 7.4  On maintenance toggle (PUT /pcs/{pc_id}/maintenance, Admin/Professor)
+
+     - Set:   state -> MAINTENANCE immediately.
+     - Clear: state -> AVAILABLE immediately, regardless of telemetry.
+              The next heartbeat (<= ~5 s) recomputes the real state, so an
+              in-use PC briefly shows Available, then In Use.
+     - Also writes pcs.is_maintenance and pcs.current_state to the DB.
+     - Does not start or stop the staleness timer.
+
+   Clearing maintenance on a PC whose agent is dead leaves it AVAILABLE
+   permanently (no heartbeat, no timer to re-evaluate) - which is the
+   sensible outcome anyway.
+
+ 7.5  Damage reports (Student)
+
+   Submitting a report does NOT change state. Only an Admin acting on it, or
+   a direct Admin/Professor toggle, sets MAINTENANCE.
+
+ 7.6  Backend restart
+
+   The in-memory store starts EMPTY. It does not load anything from the DB.
+     - Every PC is unknown to the live store until its agent heartbeats.
+     - REST falls back to pcs.current_state from the database.
+     - When an agent heartbeats, its live state starts from AVAILABLE and is
+       recomputed immediately.
+
+   [QUIRK] Maintenance does not survive a backend restart once the agent
+           reconnects: the live store doesn't know about it, so the first
+           heartbeat computes IN_USE/AVAILABLE and overwrites the DB row.
+           The toggle must be re-applied.
+
+   [QUIRK] pcs.current_state is written on every transition, so after a
+           restart a PC whose agent is gone still shows its LAST persisted
+           state via REST - e.g. IN_USE - indefinitely, because no staleness
+           timer exists for it. (Before transitions were persisted it always
+           showed AVAILABLE.) Fix: on startup, reset non-maintenance rows to
+           AVAILABLE, or load them into the live store with a timer running.
+
+ 7.7  Unregistered pc_id
+
+   Nothing happens to any state. The server replies REJECTED and closes the
+   connection; the agent logs an ERROR and retries with back-off.
+
+
+-------------------------------------------------------------------------------
+8. STATE TRANSITION TABLE
+-------------------------------------------------------------------------------
+
+ "active" below means:  session_active AND (idle < 300 OR cpu > 5 OR locked)
+
+ FROM              EVENT                            TO               WHEN
+ ----------------  -------------------------------  ---------------  ----------------------
+ AVAILABLE         heartbeat, active                IN_USE           instant
+ AVAILABLE         heartbeat, not active            (no change)      -
+ AVAILABLE         GOING_TO_SLEEP                   AVAILABLE_SLEEP  instant
+ AVAILABLE         no heartbeat for 15 s            (no change)      -
+ AVAILABLE         maintenance ON                   MAINTENANCE      instant
+
+ IN_USE            heartbeat, active                (no change)      -
+ IN_USE            heartbeat, not active            AVAILABLE        instant
+ IN_USE            GOING_TO_SLEEP (sleep/shutdown)  AVAILABLE_SLEEP  instant
+ IN_USE            no heartbeat for 15 s            AVAILABLE        15 s after last hb
+ IN_USE            maintenance ON                   MAINTENANCE      instant
+
+ AVAILABLE_SLEEP   heartbeat, active                IN_USE           instant (on wake)
+ AVAILABLE_SLEEP   heartbeat, not active            AVAILABLE        instant (on wake)
+ AVAILABLE_SLEEP   GOING_TO_SLEEP                   (no change)      -
+ AVAILABLE_SLEEP   no heartbeat                     (no change)      never times out
+ AVAILABLE_SLEEP   maintenance ON                   MAINTENANCE      instant
+
+ MAINTENANCE       heartbeat (any values)           (no change)      telemetry still updates
+ MAINTENANCE       GOING_TO_SLEEP                   (no change)      -
+ MAINTENANCE       no heartbeat for 15 s            (no change)      -
+ MAINTENANCE       maintenance OFF                  AVAILABLE        instant; next hb corrects
+
+ How "not active" typically happens:
+   - user logs out                                -> session_active false
+   - user walks away, screen NOT locked, CPU
+     quiet (<= 5%), for 5+ minutes                -> idle >= 300
+
+
+-------------------------------------------------------------------------------
+9. ATTRIBUTE: last_heartbeat_at   (card label: "Heartbeat: HH:MM:SS")
+-------------------------------------------------------------------------------
+
+ This one means DIFFERENT things depending on where the card got it.
+
+ a) Server live store (PCLiveState.last_heartbeat_at)
+    Server UTC time of the most recent HEARTBEAT received. Updated on every
+    heartbeat, including in MAINTENANCE. This is the accurate value.
+    Exposed ONLY through REST GET /labs/{lab_id}/pcs.
+
+ b) Database (pcs.last_heartbeat_at)
+    Written ONLY on state transitions, so it really means "time of last
+    state change", not last heartbeat. A PC steadily IN_USE for an hour shows
+    the time it became IN_USE. REST uses this only for PCs with no live state
+    (e.g. after a backend restart).
+
+ c) Browser (WebSocketContext pcStates[pc].last_heartbeat_at)
+    [QUIRK - IMPORTANT] Set to the BROWSER's current time whenever ANY
+    WebSocket message about that PC arrives - including:
+      - the initial_state snapshot on (re)connect, for every PC in it
+      - the state-only broadcast when a PC goes stale
+      - the state-only broadcast on a maintenance toggle
+    So it really means "when this browser last heard about this PC". A PC
+    whose agent died shows a FRESH heartbeat time at the exact moment it goes
+    stale, and a browser reconnect stamps every PC with "now".
+
+ What the card shows: (c) once any WS message has arrived for that PC since
+ page load; before that (a) or (b) from REST. "Never" if null. Displayed in
+ the browser's local time zone.
+
+ The WebSocket messages never carry the server's heartbeat time, so the
+ browser cannot show an accurate value without that field being added.
+
+
+-------------------------------------------------------------------------------
+10. WHAT THE FRONTEND RECEIVES AND WHEN
+-------------------------------------------------------------------------------
+
+ Transport 1: REST  GET /labs/{lab_id}/pcs
+   Called ONCE when the lab page mounts, and after an admin creates/deletes a
+   PC. Never polled. For each PC in the DB:
+     - has live state -> live values: state, all 4 telemetry, last_heartbeat_at
+     - no live state  -> DB values: current_state, last_heartbeat_at;
+                         telemetry fields are null
+
+ Transport 2: WebSocket  ws://<host>:8000/ws?token=<jwt>
+
+   Message A - "initial_state"
+     When:  once, immediately after each WS connection (and each reconnect)
+     Holds: every PC in the in-memory store - i.e. only PCs that have
+            heartbeated since the backend started: pc_id, state,
+            session_active, screen_locked, cpu_percent, idle_seconds
+     Not included: last_heartbeat_at; PCs with no live state
+
+   Message B - "pc_update" WITH telemetry   (broadcast_pc_heartbeat)
+     When:  after EVERY accepted heartbeat, whether or not state changed
+     Holds: pc_id, state, session_active, screen_locked, idle_seconds,
+            cpu_percent
+     Rate:  one per PC per ~5 s  ->  5 PCs = ~1 message per second
+
+   Message C - "pc_update" state ONLY   (broadcast_pc_update)
+     When:  on every state TRANSITION - heartbeat-driven, GOING_TO_SLEEP,
+            staleness timeout, maintenance toggle
+     Holds: pc_id, state   (no telemetry)
+
+     On a heartbeat that causes a transition the browser receives C and then
+     B, back-to-back, for the same PC.
+     GOING_TO_SLEEP, staleness timeout and maintenance toggle produce ONLY C.
+
+   Message D - "lab_update"
+     [QUIRK] Handled by the frontend but NEVER SENT: broadcast_lab_update()
+             has no callers. Lab state does not update live.
+
+ Who receives WS messages: every logged-in browser, for all labs, all roles.
+ There is no per-lab filtering and no role-based difference in PC data.
+
+
+-------------------------------------------------------------------------------
+11. HOW THE FRONTEND MERGES AND DISPLAYS VALUES
+-------------------------------------------------------------------------------
+
+ Step 1 - WebSocketContext.jsx keeps  pcStates = { pc_id: {...} }
+   initial_state : for each PC in it, overwrite status + the 4 telemetry
+                   fields; set last_heartbeat_at = browser now. Entries for
+                   PCs NOT in the snapshot are kept (never cleared).
+   pc_update     : status is always overwritten. Each telemetry field is
+                   overwritten only if present in the message, otherwise the
+                   previous value is kept (this is why message C doesn't blank
+                   the card). last_heartbeat_at = browser now.
+
+ Step 2 - LabDetailPage.jsx builds livePcs from the REST list + pcStates
+   For each PC from REST:
+     pcStates has an entry  -> the WS value wins for every field it has
+     no entry               -> REST values used as-is
+
+   Consequences:
+     - Only PCs that were in the REST list at page load are shown. A PC
+       registered afterwards appears only after a reload (or an admin action
+       on that page that reloads).
+     - Once any WS message has arrived for a PC, its REST values are
+       effectively ignored for the rest of the page session.
+
+ Step 3 - PCCard.jsx renders, with these fallbacks for missing values
+     state     : null/unknown -> "AVAILABLE"
+     cpu       : null -> 0    -> "0.0%"
+     idle      : null -> 0    -> "0s"
+     session   : null -> false -> "No User"
+     screen    : null -> false -> "Unlocked"
+     heartbeat : null         -> "Never"
+
+   [QUIRK] A PC that has never reported since the backend started looks
+           exactly like a genuinely idle, unlocked, logged-out PC at 0% CPU.
+           Nothing distinguishes "no data" from "real zeros".
+
+ Maintenance toggle from the card (Admin/Professor only - button hidden for
+ students):
+   1. PUT /pcs/{id}/maintenance
+   2. On success, a local optimistic update of current_state
+   3. The server also broadcasts message C to everyone
+   [QUIRK] If the PC already has a WS entry, the optimistic update is masked
+           (WS value wins the merge) until message C arrives - normally within
+           milliseconds, so not visible in practice.
+
+ Counters:
+   - The PCGrid filter-tab counts and the lab page "available" count both use
+     the merged current_state. The lab page counts ONLY "AVAILABLE" - Sleep
+     PCs are not counted as available.
+   [QUIRK] The backend lab endpoint counts AVAILABLE + AVAILABLE_SLEEP as
+           available (and then discards the number). The two definitions
+           disagree.
+
+ Connection indicator:
+   The Navbar shows "LIVE SYNC" (green) while the WS is open, "CONNECTING..."
+   (amber) otherwise. Individual cards show nothing - while disconnected,
+   every card simply freezes at its last values.
+
+
+-------------------------------------------------------------------------------
+12. WHAT DOES NOT UPDATE (FROZEN / STALE VALUES)
+-------------------------------------------------------------------------------
+
+ Situation                        State shown           Telemetry shown
+ -------------------------------  --------------------  --------------------------------
+ Agent stops / PC crashes /       AVAILABLE after 15 s  FROZEN at last heartbeat
+   network lost                                         (e.g. CPU 38%, Session Active)
+ PC sleeps (GOING_TO_SLEEP)       Sleep, instantly      FROZEN at last heartbeat
+ PC shuts down cleanly            Sleep  [QUIRK 7.2]    FROZEN at last heartbeat
+ MAINTENANCE, agent running       Maintenance           KEEPS UPDATING every ~5 s
+ MAINTENANCE, agent down          Maintenance           FROZEN
+ Browser WebSocket disconnected   FROZEN                FROZEN (Navbar: CONNECTING...)
+ Backend restarted, agent not     last DB state         0 / No User / Unlocked defaults
+   yet reconnected                  [QUIRK 7.6]
+ pc_id rejected by the server     unchanged             unchanged
+
+ [QUIRK] Neither the server nor the browser clears telemetry when a PC goes
+         stale or to sleep. A powered-off PC can read "Available / Session:
+         Active / CPU 38.0% / Screen: Locked". The state badge is correct;
+         the numbers underneath are history.
+
+ Also never updates live - only on page reload:
+   - The lab state badge (Open / Occupied / Closed)  - see section 13
+   - The list of PCs in a lab
+   - Dashboard KPI tiles "Available PCs" / "Campus Capacity" (always 0: the
+     API does not return the fields they read)
+
+
+-------------------------------------------------------------------------------
+13. LAB STATE (OPEN / OCCUPIED / CLOSED)
+-------------------------------------------------------------------------------
+
+ Computed on the server per REST request (routes/labs.py), using local time
+ in settings.TIMEZONE (default Asia/Kolkata):
+
+   1. CLOSED    if now is outside operating_start_time .. operating_end_time
+   2. OCCUPIED  if a master_timetables row matches today's ISO weekday
+                (Mon=1 .. Sun=7) with start_time <= now <= end_time,
+                and that slot has no cancellation for today's date
+   3. OPEN      otherwise
+
+ Boundaries are inclusive at both ends.
+ Lab state is independent of PC states - a lab full of IN_USE PCs still
+ reads OPEN if no class is scheduled.
+
+ WHEN IT UPDATES ON THE FRONTEND
+   Only when the page fetches /labs or /labs/{id}: on page load, the
+   Dashboard Refresh button, or an admin action that reloads the page data.
+   [QUIRK] It is never pushed. A lab stays "Open" on screen after a class
+           starts until someone refreshes, and cancelling a slot does not
+           update other open browsers.
+
+
+-------------------------------------------------------------------------------
+14. SCENARIO WALK-THROUGHS
+-------------------------------------------------------------------------------
+
+ "hb" = heartbeat. Times are approximate.
+
+ A) Student sits down at an idle, logged-out PC
+    t=0      logs in                        -> session_active becomes true
+    t<=5s    hb: session true, idle ~2      -> IN_USE; browser gets C then B
+
+ B) Student leaves WITHOUT locking or logging out
+    t=0      last keystroke
+    every 5s hb: idle climbs 5, 10, ...     -> stays IN_USE (idle < 300)
+    t~300s   hb: idle >= 300, cpu <= 5      -> AVAILABLE
+             (if a background job keeps CPU > 5%, it stays IN_USE)
+    Depends on working idle detection - see section 4.
+
+ C) Student locks the screen and leaves
+    t<=5s    hb: locked true                -> IN_USE, and it stays IN_USE for
+                                               as long as the screen is locked
+
+ D) Student logs out
+    t<=5s    hb: session false              -> AVAILABLE regardless of CPU
+
+ E) PC is suspended
+    t=0      logind PrepareForSleep(true)   -> agent sends GOING_TO_SLEEP
+             server                         -> AVAILABLE_SLEEP; browser gets C
+             telemetry on the card freezes; no timeout applies
+    wake     logind PrepareForSleep(false)  -> agent reconnects
+    t<=5s    first hb after wake            -> IN_USE or AVAILABLE
+
+ F) Agent killed / network cable pulled / PC loses power
+    t=0      last hb
+    t=15s    staleness timer                -> AVAILABLE (if it was IN_USE)
+             browser gets C; telemetry frozen; card's heartbeat time jumps
+             to "now" [QUIRK 9c]
+    later    agent reconnects               -> next hb recomputes
+
+ G) Brief network blip (a few seconds)
+    As long as a hb arrives within 15 s of the previous one, NOTHING visible
+    changes.
+
+ H) Admin puts an in-use PC into maintenance
+    click    -> MAINTENANCE instantly; browser gets C
+    each hb  -> CPU / idle / session / screen keep updating, badge stays
+    clear    -> AVAILABLE instantly, then IN_USE at the next hb if still used
+
+ I) Backend restarts while PCs are in use
+    restart  -> live store empty
+    page load before agents reconnect: REST shows last DB state, 0 telemetry
+    agents reconnect (after 5-10 s back-off) -> first hb recomputes everything
+    any PC that was in MAINTENANCE loses it [QUIRK 7.6]
+
+ J) Agent deployed with a wrong pc_id
+    hb       -> server replies REJECTED and closes the connection
+    agent    -> logs ERROR, reconnects with back-off, repeats
+    dashboard: nothing changes for any PC
+
+
+-------------------------------------------------------------------------------
+15. SUMMARY OF QUIRKS  (gap between intent and current behaviour)
+-------------------------------------------------------------------------------
+
+ Agent-side data quality
+  Q1  idle_seconds unreliable under systemd (no DISPLAY; /dev/input mtime
+      doesn't track input; fallback 0 reads as "active").          section 4
+  Q2  screen_locked probably always false under systemd; the GNOME UI
+      lock may not emit the logind Lock signal.                    section 6
+  Q3  session_active counts SSH logins and may miss some Wayland
+      desktop logins.                                              section 5
+  Q4  The first CPU reading after agent start is meaningless.      section 3
+  Q5  Slow telemetry probes can stretch the heartbeat period past
+      the 15 s grace period.                                       section 2
+
+ State logic
+  Q6  Clean shutdown shows "Sleep", not "Available", and never
+      times out.                                                   section 7.2
+  Q7  A locked screen keeps a PC IN_USE forever (no lock timeout). section 6
+  Q8  No hysteresis: values hovering at a threshold flap the state. section 7.1
+  Q9  Maintenance is lost when the backend restarts and the agent
+      reconnects.                                                  section 7.6
+  Q10 After a backend restart, a dead PC shows its last persisted
+      state (e.g. IN_USE) indefinitely.                            section 7.6
+
+ Frontend display
+  Q11 "Heartbeat" time is browser receive time, not heartbeat time,
+      and is bumped by stale/maintenance/snapshot messages.        section 9
+  Q12 Telemetry is never cleared when a PC goes stale or sleeps.   section 12
+  Q13 "No data" is indistinguishable from real zeros.              section 11
+  Q14 Lab state and the PC list never update without a reload;
+      lab_update is never sent.                                    sections 10, 13
+  Q15 "Available" count excludes Sleep on the frontend but includes
+      it on the backend.                                           section 11
+  Q16 Dashboard "Available PCs" / "Capacity" tiles are always 0.   section 12
+
+===============================================================================
