@@ -1,155 +1,48 @@
 import React from 'react'
-import { useNavigate } from 'react-router-dom'
-import StatusIndicator from './StatusIndicator'
-import {
-  FiClock,
-  FiMonitor,
-  FiArrowRight,
-  FiTrash2,
-} from 'react-icons/fi'
+import { Link } from 'react-router-dom'
+import { FiArrowRight, FiClock } from 'react-icons/fi'
+import { StackBar, StateLegend, StatusPill } from '../ui/StatusPill'
+import { formatClock } from '../../lib/time'
 
-const LabCard = ({ lab, isAdmin, onDelete }) => {
-  const navigate = useNavigate()
-
-  const labState = (lab.state || 'OPEN').toUpperCase()
-  const availableCount = lab.available_pcs !== undefined ? lab.available_pcs : '–'
-  const totalCapacity = 5  // Lab A has 5 PCs as per seed data
-
-  const getStateBorderGradient = () => {
-    switch (labState) {
-      case 'OPEN':
-        return 'linear-gradient(135deg, hsla(142, 71%, 45%, 0.3) 0%, transparent 60%)'
-      case 'OCCUPIED':
-        return 'linear-gradient(135deg, hsla(217, 91%, 60%, 0.3) 0%, transparent 60%)'
-      case 'CLOSED':
-        return 'linear-gradient(135deg, hsla(0, 84%, 60%, 0.3) 0%, transparent 60%)'
-      default:
-        return 'none'
-    }
-  }
-
-  const formatTime = (timeStr) => {
-    if (!timeStr) return '--:--'
-    if (typeof timeStr === 'string' && timeStr.includes(':')) {
-      const parts = timeStr.split(':')
-      return `${parts[0]}:${parts[1]}`
-    }
-    return timeStr
-  }
-
-  const handleDelete = (e) => {
-    e.stopPropagation()
-    if (window.confirm(`Are you sure you want to delete lab ${lab.lab_name} and ALL its PCs?`)) {
-      onDelete(lab.lab_id)
-    }
-  }
-
-  return (
-    <div
-      onClick={() => navigate(`/labs/${lab.lab_id}`)}
-      className="glass-card-hover lab-card"
-      style={{
-        background: `radial-gradient(circle at top left, hsla(220, 20%, 16%, 0.8), hsla(220, 20%, 9%, 0.95))`,
-        borderTop: `2px solid ${
-          labState === 'OPEN'
-            ? 'var(--color-success)'
-            : labState === 'OCCUPIED'
-            ? 'var(--color-primary)'
-            : 'var(--color-danger)'
-        }`,
-      }}
-    >
-      <div className="lab-card-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <h3 className="lab-name">{lab.lab_name}</h3>
-          {isAdmin && (
-            <button
-              onClick={handleDelete}
-              className="btn btn-sm"
-              style={{ padding: '0.2rem', color: 'var(--color-danger)', background: 'transparent', border: 'none' }}
-              title="Delete Lab"
-            >
-              <FiTrash2 size={14} />
-            </button>
-          )}
-        </div>
-        <StatusIndicator state={labState} />
+const LabCard = ({ lab, counts, loading }) => (
+  <Link to={`/labs/${lab.lab_id}`} className="card lab-card">
+    <div className="lab-card__top">
+      <div style={{ minWidth: 0 }}>
+        <div className="lab-card__name">{lab.lab_name}</div>
+        <div className="lab-card__id mono">{lab.lab_id}</div>
       </div>
-
-      {/* PC Availability Stat Box */}
-      <div className="lab-stat-row">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-          <div
-            style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: 'var(--radius-sm)',
-              background: 'hsla(217, 91%, 60%, 0.12)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'var(--color-primary)',
-            }}
-          >
-            <FiMonitor size={16} />
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-              Workstations
-            </span>
-            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-              Live Availability
-            </span>
-          </div>
-        </div>
-
-        <div style={{ textAlign: 'right' }}>
-          <span className="lab-stat-num">
-            {availableCount}
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 400 }}>
-              /{totalCapacity}
-            </span>
-          </span>
-          <div style={{ fontSize: '0.68rem', color: 'var(--color-success)', fontWeight: 500 }}>
-            Available Now
-          </div>
-        </div>
-      </div>
-
-      {/* Operating Hours & Footer */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          fontSize: '0.75rem',
-          color: 'var(--text-secondary)',
-          paddingTop: '0.5rem',
-          borderTop: '1px solid var(--border-glass)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-          <FiClock size={13} style={{ color: 'var(--text-muted)' }} />
-          <span>
-            {formatTime(lab.operating_start_time)} – {formatTime(lab.operating_end_time)}
-          </span>
-        </div>
-
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.3rem',
-            color: 'var(--color-primary)',
-            fontWeight: 600,
-          }}
-        >
-          <span>View Lab</span>
-          <FiArrowRight size={13} />
-        </div>
-      </div>
+      <StatusPill kind="lab" state={lab.state} />
     </div>
-  )
-}
+
+    <div>
+      <div className="lab-card__avail">
+        <span className="lab-card__avail-num">{loading ? '–' : counts.free}</span>
+        <span className="lab-card__avail-label">
+          of {loading ? '–' : counts.total} {counts.total === 1 ? 'workstation' : 'workstations'} free
+        </span>
+      </div>
+      <div style={{ margin: '12px 0 10px' }}>
+        <StackBar counts={counts} />
+      </div>
+      {counts.total > 0 ? (
+        <StateLegend counts={counts} hideEmpty />
+      ) : (
+        <div className="legend subtle">{loading ? 'Loading workstations…' : 'No workstations registered'}</div>
+      )}
+    </div>
+
+    <div className="lab-card__foot">
+      <span className="inline-meta">
+        <FiClock size={13} />
+        <span className="num">
+          {formatClock(lab.operating_start_time)} – {formatClock(lab.operating_end_time)}
+        </span>
+      </span>
+      <span className="inline-meta" style={{ color: 'var(--text)', fontWeight: 500 }}>
+        Open lab <FiArrowRight size={13} style={{ color: 'inherit' }} />
+      </span>
+    </div>
+  </Link>
+)
 
 export default LabCard

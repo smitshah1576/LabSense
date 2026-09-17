@@ -1,139 +1,106 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
-import { FiMonitor, FiLayers, FiCheck, FiExternalLink, FiPackage } from 'react-icons/fi'
+import { FiArrowRight, FiMonitor, FiPackage, FiSearch } from 'react-icons/fi'
+import EmptyState from '../ui/EmptyState'
 
-const SoftwareResults = ({ results = [], searchQuery = '', loading = false }) => {
-  if (loading) {
+const MAX_CHIPS = 8
+
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+const Highlight = ({ text, query }) => {
+  if (!query) return text
+  const parts = text.split(new RegExp(`(${escapeRegExp(query)})`, 'ig'))
+  return parts.map((part, i) => (part.toLowerCase() === query.toLowerCase() ? <mark key={i}>{part}</mark> : part))
+}
+
+const SoftwareResults = ({ results = [], query = '', loading = false, showLab = true, minLength = 2 }) => {
+  if (query.length < minLength) {
     return (
-      <div className="glass-panel" style={{ textAlign: 'center', padding: '3rem 1rem' }}>
-        <div style={{ color: 'var(--text-secondary)' }}>Searching installed software packages across campus...</div>
+      <div className="card">
+        <EmptyState
+          icon={FiPackage}
+          title="Search installed software"
+          description="Type at least two characters to find which workstations have a package installed."
+        />
       </div>
     )
   }
 
-  if (!searchQuery) {
-    return (
-      <div className="glass-panel" style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
-        <FiPackage size={40} style={{ opacity: 0.4, marginBottom: '0.75rem' }} />
-        <p>Enter a software name above to find workstations with it installed.</p>
-      </div>
-    )
+  if (loading && results.length === 0) {
+    return <div className="skeleton" style={{ height: 160 }} />
   }
 
   if (results.length === 0) {
     return (
-      <div className="glass-panel" style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
-        <p>No workstations found with software matching "{searchQuery}".</p>
+      <div className="card">
+        <EmptyState
+          icon={FiSearch}
+          title={`No workstations have “${query}”`}
+          description="Package names are matched as reported by dpkg and pip — try a shorter or different name, e.g. “python3” rather than “Python 3.11”."
+        />
       </div>
     )
   }
 
-  // Group results by lab
-  const groupedByLab = results.reduce((acc, item) => {
-    const labKey = item.lab_id || 'unassigned'
-    if (!acc[labKey]) {
-      acc[labKey] = {
-        lab_id: item.lab_id,
-        lab_name: item.lab_name || `Lab #${item.lab_id}`,
-        pcs: [],
-      }
-    }
-    acc[labKey].pcs.push(item)
+  const groups = results.reduce((acc, item) => {
+    const key = item.lab_id || 'unassigned'
+    if (!acc[key]) acc[key] = { lab_id: item.lab_id, lab_name: item.lab_name || item.lab_id, pcs: [] }
+    acc[key].pcs.push(item)
     return acc
   }, {})
 
+  const groupList = Object.values(groups).sort((a, b) => String(a.lab_name).localeCompare(String(b.lab_name)))
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-      <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-        Found <strong style={{ color: 'var(--color-primary)' }}>{results.length}</strong> matching workstation(s) across{' '}
-        <strong style={{ color: 'var(--text-primary)' }}>{Object.keys(groupedByLab).length}</strong> lab(s)
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, opacity: loading ? 0.6 : 1, transition: 'opacity 120ms' }}>
+      <div className="muted">
+        <b style={{ color: 'var(--text)', fontWeight: 600 }}>{results.length}</b> {results.length === 1 ? 'workstation' : 'workstations'}
+        {showLab && (
+          <>
+            {' '}
+            in <b style={{ color: 'var(--text)', fontWeight: 600 }}>{groupList.length}</b> {groupList.length === 1 ? 'lab' : 'labs'}
+          </>
+        )}
       </div>
 
-      {Object.values(groupedByLab).map((group) => (
-        <div key={group.lab_id} className="glass-card" style={{ padding: '1.25rem' }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: '1rem',
-              paddingBottom: '0.6rem',
-              borderBottom: '1px solid var(--border-glass)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <div
-                style={{
-                  width: '28px',
-                  height: '28px',
-                  borderRadius: 'var(--radius-sm)',
-                  background: 'hsla(217, 91%, 60%, 0.15)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--color-primary)',
-                }}
-              >
-                <FiLayers size={14} />
-              </div>
-              <h4 style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                {group.lab_name}
-              </h4>
-              <span className="badge badge-in-use" style={{ fontSize: '0.7rem' }}>
-                {group.pcs.length} {group.pcs.length === 1 ? 'PC' : 'PCs'} Available
-              </span>
-            </div>
-
-            <Link
-              to={`/labs/${group.lab_id}`}
-              className="btn btn-ghost btn-sm"
-              style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', color: 'var(--color-primary)' }}
-            >
-              <span>Go to Lab</span>
-              <FiExternalLink size={13} />
-            </Link>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '0.75rem' }}>
-            {group.pcs.map((pc) => (
-              <div
-                key={pc.pc_id}
-                style={{
-                  padding: '0.75rem',
-                  borderRadius: 'var(--radius-sm)',
-                  background: 'hsla(220, 20%, 8%, 0.6)',
-                  border: '1px solid var(--border-glass)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.4rem',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <FiMonitor size={14} style={{ color: 'var(--color-primary)' }} />
-                  <span style={{ fontWeight: 600, fontSize: '0.85rem', fontFamily: 'JetBrains Mono, monospace' }}>
-                    {pc.hostname || pc.pc_id}
-                  </span>
-                </div>
-                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                  ID: {pc.pc_id}
-                </div>
-                <div
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.3rem',
-                    fontSize: '0.72rem',
-                    color: 'var(--color-success)',
-                    marginTop: '0.2rem',
-                  }}
-                >
-                  <FiCheck size={12} />
-                  <span>Matches "{searchQuery}"</span>
+      {groupList.map((group) => (
+        <section key={group.lab_id} className="card result">
+          {showLab && (
+            <header className="card__header">
+              <div>
+                <div className="card__title">{group.lab_name}</div>
+                <div className="subtle" style={{ fontSize: 12 }}>
+                  {group.pcs.length} {group.pcs.length === 1 ? 'workstation' : 'workstations'}
                 </div>
               </div>
-            ))}
-          </div>
-        </div>
+              <Link to={`/labs/${group.lab_id}`} className="btn btn--ghost btn--sm">
+                View lab <FiArrowRight size={13} />
+              </Link>
+            </header>
+          )}
+          {group.pcs
+            .slice()
+            .sort((a, b) => a.pc_id.localeCompare(b.pc_id, undefined, { numeric: true }))
+            .map((pc, i) => {
+              const pkgs = pc.matching_packages || []
+              return (
+                <div key={pc.pc_id} className="result__row" style={!showLab && i === 0 ? { borderTop: 0 } : undefined}>
+                  <div className="result__pc">
+                    <FiMonitor size={14} />
+                    <span className="mono">{pc.pc_id}</span>
+                  </div>
+                  <div className="chips">
+                    {pkgs.slice(0, MAX_CHIPS).map((pkg) => (
+                      <span key={pkg} className="chip chip--pkg">
+                        <Highlight text={pkg} query={query} />
+                      </span>
+                    ))}
+                    {pkgs.length > MAX_CHIPS && <span className="subtle" style={{ fontSize: 12 }}>+{pkgs.length - MAX_CHIPS} more</span>}
+                  </div>
+                </div>
+              )
+            })}
+        </section>
       ))}
     </div>
   )

@@ -65,7 +65,17 @@ export const AuthProvider = ({ children }) => {
     try {
       const res = await authApi.login(email, password)
       const accessToken = res.data.access_token
-      handleAuthSuccess(accessToken)
+      // The login response includes the profile; keep it so the UI can show
+      // the person's name rather than falling back to their email address.
+      const profile = res.data.user
+        ? {
+            email: res.data.user.email,
+            id: res.data.user.user_id,
+            role: res.data.user.role,
+            full_name: res.data.user.full_name,
+          }
+        : null
+      handleAuthSuccess(accessToken, profile)
       return { success: true }
     } catch (err) {
       const message = err.response?.data?.detail || 'Invalid email or password'
@@ -80,7 +90,11 @@ export const AuthProvider = ({ children }) => {
     try {
       const res = await authApi.register(email, password, fullName, role)
       const accessToken = res.data.access_token
-      handleAuthSuccess(accessToken, { email, role, full_name: fullName })
+      const u = res.data.user
+      handleAuthSuccess(
+        accessToken,
+        u ? { email: u.email, id: u.user_id, role: u.role, full_name: u.full_name } : { email, role, full_name: fullName }
+      )
       return { success: true }
     } catch (err) {
       const message = err.response?.data?.detail || 'Registration failed'

@@ -1,51 +1,50 @@
 import React from 'react'
+import { Navigate, useLocation } from 'react-router-dom'
+import { FiMonitor } from 'react-icons/fi'
 import LoginForm from '../components/Auth/LoginForm'
+import { useAuth } from '../hooks/useAuth'
+import { useDocumentTitle } from '../lib/hooks'
+
+// Decorative only: a miniature lab, to say what the product does at a glance.
+const PREVIEW = ['available', 'in-use', 'in-use', 'available', 'sleep', 'in-use', 'available', 'maintenance', 'available', 'in-use']
 
 const LoginPage = () => {
-  return (
-    <div
-      style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '1.5rem',
-        position: 'relative',
-        overflow: 'hidden',
-        background: 'radial-gradient(ellipse at center, hsla(220, 20%, 12%, 1) 0%, hsla(220, 20%, 6%, 1) 100%)',
-      }}
-    >
-      {/* Dynamic Background Glow Orbs */}
-      <div
-        style={{
-          position: 'absolute',
-          top: '15%',
-          left: '20%',
-          width: '380px',
-          height: '380px',
-          borderRadius: '50%',
-          background: 'radial-gradient(circle, hsla(217, 91%, 60%, 0.15) 0%, transparent 70%)',
-          filter: 'blur(50px)',
-          pointerEvents: 'none',
-        }}
-      />
-      <div
-        style={{
-          position: 'absolute',
-          bottom: '15%',
-          right: '20%',
-          width: '420px',
-          height: '420px',
-          borderRadius: '50%',
-          background: 'radial-gradient(circle, hsla(262, 83%, 58%, 0.12) 0%, transparent 70%)',
-          filter: 'blur(60px)',
-          pointerEvents: 'none',
-        }}
-      />
+  const { isAuthenticated } = useAuth()
+  const location = useLocation()
+  useDocumentTitle('Sign in')
 
-      <div style={{ position: 'relative', zIndex: 2, width: '100%', display: 'flex', justifyContent: 'center' }}>
+  if (isAuthenticated) return <Navigate to={location.state?.from?.pathname || '/'} replace />
+
+  return (
+    <div className="auth">
+      <aside className="auth__aside">
+        <div className="auth__brand">
+          <span className="brand-mark" aria-hidden="true">
+            <FiMonitor size={15} />
+          </span>
+          LabSense
+        </div>
+
+        <div className="auth__pitch">
+          <h1>Know which lab machines are free before you walk over.</h1>
+          <p>Live workstation status, lab schedules and installed software for every lab on campus, in one place.</p>
+          <div className="auth__preview" aria-hidden="true">
+            {PREVIEW.map((tone, i) => (
+              <div key={i} className={`auth__preview-pc tone-${tone}`}>
+                <i style={{ background: 'var(--tone-dot)' }} />
+                <b />
+                <b />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="auth__foot">Smart Campus Lab Resource Allocator &amp; Live Monitor</div>
+      </aside>
+
+      <main className="auth__main">
         <LoginForm />
-      </div>
+      </main>
     </div>
   )
 }

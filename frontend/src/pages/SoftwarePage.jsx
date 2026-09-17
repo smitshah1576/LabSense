@@ -1,102 +1,69 @@
-import React, { useState } from 'react'
-import { softwareApi } from '../api/endpoints'
+import React, { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { FiInfo } from 'react-icons/fi'
 import SearchBar from '../components/Software/SearchBar'
 import SoftwareResults from '../components/Software/SoftwareResults'
-import { FiSearch, FiPackage, FiZap } from 'react-icons/fi'
+import PageHeader from '../components/ui/PageHeader'
+import { useSoftwareSearch } from '../hooks/useSoftwareSearch'
+import { apiError, useDocumentTitle } from '../lib/hooks'
 
-const POPULAR_PACKAGES = [
-  'Python',
-  'VS Code',
-  'Docker',
-  'MATLAB',
-  'Wireshark',
-  'Blender',
-  'GCC',
-  'PostgreSQL',
-  'Git',
-  'Java',
-]
+// Real package names as dpkg / pip report them, so each suggestion can match.
+const SUGGESTIONS = ['python3', 'gcc', 'git', 'openjdk', 'code', 'docker', 'wireshark', 'numpy', 'postgresql', 'blender']
 
 const SoftwarePage = () => {
-  const [query, setQuery] = useState('')
-  const [results, setResults] = useState([])
-  const [loading, setLoading] = useState(false)
+  useDocumentTitle('Software')
+  const [params, setParams] = useSearchParams()
+  const [query, setQuery] = useState(params.get('q') || '')
+  const search = useSoftwareSearch(query)
 
-  const handleSearch = async (q) => {
-    setQuery(q)
-    if (!q || q.length < 2) {
-      setResults([])
-      return
-    }
-    setLoading(true)
-    try {
-      const res = await softwareApi.searchGlobal(q)
-      if (Array.isArray(res.data)) {
-        setResults(res.data)
-      }
-    } catch (err) {
-      console.error('Failed to search software globally:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
+  // Keep ?q= in the URL so a search can be shared or bookmarked.
+  useEffect(() => {
+    const q = search.query
+    if ((params.get('q') || '') !== q) setParams(q ? { q } : {}, { replace: true })
+  }, [search.query]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="page-container">
-      <div className="page-header">
-        <div className="page-title-group">
-          <h1 className="page-title">
-            <FiPackage style={{ color: 'var(--color-primary)' }} />
-            Campus Software Locator
-          </h1>
-          <p className="page-subtitle">
-            Find which campus labs and workstations have specific applications, compilers, and IDEs installed
-          </p>
-        </div>
-      </div>
+    <>
+      <PageHeader title="Software" description="Find which workstations have a package installed, across every lab." />
 
-      {/* Search Header Panel */}
-      <div className="glass-card" style={{ padding: '1.75rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+      <div className="card search-hero">
         <SearchBar
-          onSearch={handleSearch}
-          placeholder="Search any software tool, IDE, package or CLI (e.g. PyTorch, Quartus, CLion, Rust)..."
-          loading={loading}
-          initialValue={query}
+          size="lg"
+          value={query}
+          onChange={setQuery}
+          loading={search.loading}
+          placeholder="Search packages, e.g. python3, gcc, wireshark"
+          autoFocus
         />
-
-        {/* Popular Tags */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-            <FiZap size={13} style={{ color: 'var(--color-warning)' }} />
-            Popular:
+        <div className="chips" style={{ marginTop: 14 }}>
+          <span className="subtle" style={{ fontSize: 12.5, marginRight: 4 }}>
+            Try
           </span>
-          {POPULAR_PACKAGES.map((pkg) => (
-            <button
-              key={pkg}
-              onClick={() => handleSearch(pkg)}
-              className="btn btn-ghost btn-sm"
-              style={{
-                fontSize: '0.75rem',
-                padding: '0.2rem 0.6rem',
-                borderRadius: 'var(--radius-full)',
-                background: 'hsla(220, 20%, 14%, 0.6)',
-                border: '1px solid var(--border-glass)',
-                color: query.toLowerCase() === pkg.toLowerCase() ? 'var(--color-primary)' : 'var(--text-secondary)',
-              }}
-            >
-              {pkg}
+          {SUGGESTIONS.map((s) => (
+            <button key={s} type="button" className="chip" aria-pressed={query.trim() === s} onClick={() => setQuery(s)}>
+              {s}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Results */}
-      <SoftwareResults
-        results={results}
-        searchQuery={query}
-        loading={loading}
-      />
-    </div>
+      <div className="section" style={{ marginTop: 20 }}>
+        {search.error ? (
+          <div className="alert alert--error">{apiError(search.error, 'Search failed')}</div>
+        ) : (
+          <SoftwareResults results={search.results} query={search.query} loading={search.loading} minLength={search.minLength} />
+        )}
+      </div>
+
+      <div className="note" style={{ marginTop: 20 }}>
+        <FiInfo size={15} />
+        <div>
+          <strong>What is indexed.</strong> System packages from <span className="mono">dpkg</span> and globally installed{' '}
+          <span className="mono">pip</span> packages, rescanned every few minutes by each workstation's agent. Packages inside
+          virtual environments are not included.
+        </div>
+      </div>
+    </>
   )
 }
 

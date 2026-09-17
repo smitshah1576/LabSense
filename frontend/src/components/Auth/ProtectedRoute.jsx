@@ -1,5 +1,6 @@
 import React from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
+import { FiLoader } from 'react-icons/fi'
 import { useAuth } from '../../hooks/useAuth'
 
 const ProtectedRoute = ({ children, allowedRoles }) => {
@@ -8,17 +9,8 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
 
   if (loading) {
     return (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          height: '100vh',
-          backgroundColor: 'var(--bg-primary)',
-          color: 'var(--text-secondary)',
-        }}
-      >
-        Authenticating...
+      <div className="center-screen">
+        <FiLoader className="spin" size={20} aria-label="Signing in" />
       </div>
     )
   }
@@ -27,11 +19,8 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
     return <Navigate to="/login" state={{ from: location }} replace />
   }
 
-  if (allowedRoles && Array.isArray(allowedRoles) && user) {
-    const hasRole = allowedRoles.includes(user.role)
-    if (!hasRole) {
-      return <Navigate to="/" replace />
-    }
+  if (allowedRoles && user && !allowedRoles.includes(user.role)) {
+    return <Navigate to="/" replace />
   }
 
   return children

@@ -1,109 +1,84 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { timetableApi } from '../../api/endpoints'
-import { FiX, FiCalendar, FiAlertCircle } from 'react-icons/fi'
+import { apiError } from '../../lib/hooks'
+import { formatClock, formatDateShort, isoWeekday, nextOccurrence, parseLocalDate, toLocalISODate, weekdayName } from '../../lib/time'
+import Modal from '../ui/Modal'
+import { useToast } from '../ui/Feedback'
 
-const CancelSlotModal = ({ slot, onClose, onSlotCancelled }) => {
-  const today = new Date().toISOString().split('T')[0]
-  const [date, setDate] = useState(today)
-  const [reason, setReason] = useState('Cancelled by faculty')
+const CancelSlotModal = ({ slot, onClose, onCancelled }) => {
+  const toast = useToast()
+  const [date, setDate] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState(null)
 
-  if (!slot) return null
+  useEffect(() => {
+    if (slot) setDate(toLocalISODate(nextOccurrence(slot.day_of_week)))
+  }, [slot])
+
+  const today = toLocalISODate(new Date())
+  const wrongDay = slot && date && isoWeekday(parseLocalDate(date)) !== Number(slot.day_of_week)
+  const inPast = date && date < today
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (wrongDay || inPast) return
     setSubmitting(true)
-    setError(null)
-
     try {
-      await timetableApi.cancelSlot(slot.id, date, reason)
-      if (onSlotCancelled) onSlotCancelled()
+      await timetableApi.cancelSlot(slot.timetable_id, date)
+      toast.success(`${slot.course_code || 'Class'} cancelled for ${formatDateShort(date)}`)
+      onCancelled?.()
       onClose()
     } catch (err) {
-      console.error('Failed to cancel slot:', err)
-      setError(err.response?.data?.detail || 'Failed to cancel slot for this date')
+      toast.error(apiError(err, 'Could not cancel the class'))
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <FiAlertCircle size={20} style={{ color: 'var(--color-warning)' }} />
-            <h4 className="modal-title">Cancel Timetable Session</h4>
-          </div>
-          <button className="btn btn-ghost btn-icon" onClick={onClose}>
-            <FiX size={18} />
+    <Modal
+      open={!!slot}
+      onClose={onClose}
+      onSubmit={handleSubmit}
+      busy={submitting}
+      size="sm"
+      title={`Cancel ${slot?.course_code || 'class'} for one date`}
+      description={
+        slot
+          ? `${weekdayName(slot.day_of_week)}s, ${formatClock(slot.start_time)}–${formatClock(slot.end_time)}. The lab reads Open instead of Occupied on that date; other weeks are unaffected.`
+          : undefined
+      }
+      footer={
+        <>
+          <button type="button" className="btn btn--secondary" onClick={onClose} disabled={submitting}>
+            Keep class
           </button>
-        </div>
-
-        {error && (
-          <div
-            style={{
-              padding: '0.75rem',
-              borderRadius: 'var(--radius-sm)',
-              background: 'hsla(0, 84%, 60%, 0.15)',
-              border: '1px solid var(--color-danger)',
-              color: 'var(--color-danger)',
-              fontSize: '0.85rem',
-            }}
-          >
-            {error}
-          </div>
+          <button type="submit" className="btn btn--danger" disabled={submitting || wrongDay || inPast || !date}>
+            {submitting ? 'Cancelling…' : 'Cancel class'}
+          </button>
+        </>
+      }
+    >
+      <div className="field">
+        <label className="field__label" htmlFor="cancel_date">
+          Date
+        </label>
+        <input
+          id="cancel_date"
+          type="date"
+          className="input"
+          value={date}
+          min={today}
+          onChange={(e) => setDate(e.target.value)}
+          required
+        />
+        {wrongDay && (
+          <span className="field__error">
+            That date is a {weekdayName(isoWeekday(parseLocalDate(date)))}. This class runs on {weekdayName(slot.day_of_week)}s.
+          </span>
         )}
-
-        <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-          Cancelling slot: <strong style={{ color: 'var(--text-primary)' }}>{slot.start_time} – {slot.end_time}</strong>. Workstations in this lab will immediately become marked as available during this time.
-        </div>
-
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div className="input-group">
-            <label className="input-label">Cancellation Date</label>
-            <input
-              type="date"
-              className="input"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              required
-            />
-          </div>
-
-          <div className="input-group">
-            <label className="input-label">Reason for Cancellation</label>
-            <input
-              type="text"
-              className="input"
-              placeholder="e.g. Faculty on leave / Special holiday"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              required
-            />
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={onClose}
-              disabled={submitting}
-            >
-              Back
-            </button>
-            <button
-              type="submit"
-              className="btn btn-danger"
-              disabled={submitting}
-            >
-              {submitting ? 'Cancelling...' : 'Confirm Cancellation'}
-            </button>
-          </div>
-        </form>
+        {inPast && <span className="field__error">Choose today or a later date.</span>}
       </div>
-    </div>
+    </Modal>
   )
 }
 

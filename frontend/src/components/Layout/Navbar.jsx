@@ -1,102 +1,111 @@
-import React from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import React, { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { FiChevronDown, FiLogOut, FiMenu, FiMonitor, FiMoon, FiSun } from 'react-icons/fi'
 import { useAuth } from '../../hooks/useAuth'
 import { useLabState } from '../../hooks/useLabState'
-import { FiMonitor, FiLogOut, FiActivity, FiUser } from 'react-icons/fi'
+import { useTheme } from '../../context/ThemeContext'
 
-const Navbar = () => {
+const THEME_CYCLE = { system: 'light', light: 'dark', dark: 'system' }
+const THEME_ICON = { system: FiMonitor, light: FiSun, dark: FiMoon }
+const THEME_LABEL = { system: 'System theme', light: 'Light theme', dark: 'Dark theme' }
+
+const initials = (user) => {
+  const source = user?.full_name || user?.email || '?'
+  const parts = source.split(/[\s@.]+/).filter(Boolean)
+  return ((parts[0]?.[0] || '') + (user?.full_name ? parts[1]?.[0] || '' : '')).toUpperCase()
+}
+
+const Navbar = ({ onMenu }) => {
   const { user, logout } = useAuth()
   const { connected } = useLabState()
+  const { preference, setPreference } = useTheme()
   const navigate = useNavigate()
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef(null)
+
+  useEffect(() => {
+    if (!menuOpen) return undefined
+    const onDown = (e) => menuRef.current && !menuRef.current.contains(e.target) && setMenuOpen(false)
+    const onKey = (e) => e.key === 'Escape' && setMenuOpen(false)
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [menuOpen])
+
+  const ThemeIcon = THEME_ICON[preference] || FiMonitor
+  const displayName = user?.full_name || user?.email?.split('@')[0] || 'Account'
 
   const handleLogout = () => {
     logout()
     navigate('/login')
   }
 
-  const getRoleBadgeClass = (role) => {
-    switch (role) {
-      case 'ADMIN':
-        return 'badge-maintenance'
-      case 'PROFESSOR':
-        return 'badge-sleep'
-      default:
-        return 'badge-in-use'
-    }
-  }
-
   return (
-    <header className="navbar">
-      <div style={{ display: 'flex', alignItems: 'center', gap: '2rem' }}>
-        <Link to="/" className="nav-brand">
-          <div className="brand-icon">
-            <FiMonitor size={20} />
-          </div>
-          <span>
-            Lab<span style={{ color: 'var(--color-primary)' }}>Sense</span>
-          </span>
-        </Link>
+    <header className="topbar">
+      <button type="button" className="btn btn--ghost btn--icon topbar__menu" onClick={onMenu} aria-label="Open navigation">
+        <FiMenu size={18} />
+      </button>
 
-        {/* Live sync indicator */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            fontSize: '0.75rem',
-            padding: '0.25rem 0.65rem',
-            borderRadius: 'var(--radius-full)',
-            background: connected ? 'hsla(142, 71%, 45%, 0.1)' : 'hsla(38, 92%, 50%, 0.1)',
-            border: `1px solid ${connected ? 'hsla(142, 71%, 45%, 0.25)' : 'hsla(38, 92%, 50%, 0.25)'}`,
-            color: connected ? 'var(--color-success)' : 'var(--color-warning)',
-          }}
-          title={connected ? 'Real-time WebSocket connected' : 'Connecting to live updates...'}
-        >
-          <span
-            style={{
-              width: '6px',
-              height: '6px',
-              borderRadius: '50%',
-              backgroundColor: connected ? 'var(--color-success)' : 'var(--color-warning)',
-              boxShadow: connected ? '0 0 6px var(--color-success)' : '0 0 6px var(--color-warning)',
-            }}
-          />
-          <span style={{ fontWeight: 500 }}>
-            {connected ? 'LIVE SYNC' : 'CONNECTING...'}
-          </span>
-        </div>
+      <div
+        className={`live ${connected ? 'live--on' : ''}`}
+        title={connected ? 'Receiving live updates' : 'Reconnecting to live updates…'}
+      >
+        <span className="live__dot" aria-hidden="true" />
+        <span className="live__text">{connected ? 'Live' : 'Reconnecting…'}</span>
       </div>
 
-      <div className="nav-user">
-        {user && (
-          <div className="user-badge">
-            <div className="user-avatar">
-              {user.full_name ? user.full_name.charAt(0).toUpperCase() : user.email.charAt(0).toUpperCase()}
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', textAlign: 'left', lineHeight: 1.2 }}>
-              <span style={{ fontWeight: 600, fontSize: '0.82rem' }}>
-                {user.full_name || user.email.split('@')[0]}
-              </span>
-              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                {user.email}
-              </span>
-            </div>
-            <span className={`badge ${getRoleBadgeClass(user.role)}`} style={{ fontSize: '0.65rem', padding: '0.15rem 0.45rem' }}>
-              {user.role}
+      <div className="topbar__spacer" />
+
+      <button
+        type="button"
+        className="btn btn--ghost btn--icon"
+        onClick={() => setPreference(THEME_CYCLE[preference] || 'system')}
+        title={`${THEME_LABEL[preference]} — click to change`}
+        aria-label={`${THEME_LABEL[preference]}. Change theme`}
+      >
+        <ThemeIcon size={16} />
+      </button>
+
+      {user && (
+        <div className="user-menu" ref={menuRef}>
+          <button
+            type="button"
+            className="user-menu__trigger"
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+          >
+            <span className="avatar" aria-hidden="true">
+              {initials(user)}
             </span>
-          </div>
-        )}
+            <span className="user-menu__text">
+              <span className="user-menu__name" style={{ display: 'block' }}>
+                {displayName}
+              </span>
+              <span className="user-menu__role">{(user.role || '').toLowerCase()}</span>
+            </span>
+            <FiChevronDown size={14} className="subtle" />
+          </button>
 
-        <button
-          onClick={handleLogout}
-          className="btn btn-ghost btn-sm"
-          title="Sign out of LabSense"
-          style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-secondary)' }}
-        >
-          <FiLogOut size={16} />
-          <span>Logout</span>
-        </button>
-      </div>
+          {menuOpen && (
+            <div className="menu" role="menu">
+              <div className="menu__header">
+                <div style={{ fontWeight: 500 }}>{displayName}</div>
+                <div className="subtle" style={{ fontSize: 12 }}>
+                  {user.email}
+                </div>
+              </div>
+              <button type="button" role="menuitem" className="menu__item" onClick={handleLogout}>
+                <FiLogOut size={15} />
+                Sign out
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </header>
   )
 }

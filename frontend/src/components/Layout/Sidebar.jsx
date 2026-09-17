@@ -1,187 +1,63 @@
-import React, { useState, useEffect } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import React from 'react'
+import { NavLink } from 'react-router-dom'
+import { FiAlertTriangle, FiCalendar, FiGrid, FiMonitor, FiPackage } from 'react-icons/fi'
 import { useAuth } from '../../hooks/useAuth'
-import { labsApi } from '../../api/endpoints'
-import {
-  FiGrid,
-  FiSearch,
-  FiCalendar,
-  FiAlertTriangle,
-  FiLayers,
-  FiChevronDown,
-  FiChevronRight,
-  FiCpu,
-} from 'react-icons/fi'
+import { useLabs } from '../../context/LabsContext'
+import { labStateMeta } from '../../lib/pcState'
 
-const Sidebar = () => {
+const navClass = ({ isActive }) => `nav-link ${isActive ? 'active' : ''}`
+
+const Sidebar = ({ open }) => {
   const { isProfessor, isAdmin } = useAuth()
-  const location = useLocation()
-  const [labs, setLabs] = useState([])
-  const [labsOpen, setLabsOpen] = useState(true)
-
-  useEffect(() => {
-    let mounted = true
-    labsApi
-      .getLabs()
-      .then((res) => {
-        if (mounted && Array.isArray(res.data)) {
-          setLabs(res.data)
-        }
-      })
-      .catch((err) => {
-        console.warn('Could not fetch labs for sidebar:', err)
-      })
-    return () => {
-      mounted = false
-    }
-  }, [])
+  const { labs, loading } = useLabs()
 
   return (
-    <aside className="sidebar">
-      <div className="sidebar-header">
-        <NavLink to="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-          <div className="brand-icon" style={{ width: '28px', height: '28px' }}>
-            <FiCpu size={16} />
-          </div>
-          <span style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--text-primary)' }}>
-            Lab<span style={{ color: 'var(--color-primary)' }}>Sense</span>
-          </span>
+    <aside className={`sidebar ${open ? 'sidebar--open' : ''}`} aria-label="Primary">
+      <NavLink to="/" className="sidebar__brand">
+        <span className="brand-mark" aria-hidden="true">
+          <FiMonitor size={15} />
+        </span>
+        LabSense
+      </NavLink>
+
+      <nav className="sidebar__nav">
+        <NavLink to="/" end className={navClass}>
+          <FiGrid size={16} />
+          <span className="nav-link__label">Overview</span>
         </NavLink>
-      </div>
-
-      <div className="sidebar-content">
-        <div className="sidebar-section-title">Navigation</div>
-
-        <NavLink
-          to="/"
-          end
-          className={({ isActive }) =>
-            `sidebar-link ${isActive ? 'active' : ''}`
-          }
-        >
-          <span className="sidebar-link-icon">
-            <FiGrid size={18} />
-          </span>
-          <span>Dashboard</span>
+        <NavLink to="/software" className={navClass}>
+          <FiPackage size={16} />
+          <span className="nav-link__label">Software</span>
         </NavLink>
-
-        <NavLink
-          to="/software"
-          className={({ isActive }) =>
-            `sidebar-link ${isActive ? 'active' : ''}`
-          }
-        >
-          <span className="sidebar-link-icon">
-            <FiSearch size={18} />
-          </span>
-          <span>Software Search</span>
-        </NavLink>
-
         {isProfessor() && (
-          <NavLink
-            to="/timetable"
-            className={({ isActive }) =>
-              `sidebar-link ${isActive ? 'active' : ''}`
-            }
-          >
-            <span className="sidebar-link-icon">
-              <FiCalendar size={18} />
-            </span>
-            <span>Timetable</span>
+          <NavLink to="/timetable" className={navClass}>
+            <FiCalendar size={16} />
+            <span className="nav-link__label">Timetable</span>
           </NavLink>
         )}
-
-        <NavLink
-          to="/damage-reports"
-          className={({ isActive }) =>
-            `sidebar-link ${isActive ? 'active' : ''}`
-          }
-        >
-          <span className="sidebar-link-icon">
-            <FiAlertTriangle size={18} />
-          </span>
-          <span>Damage Reports</span>
+        <NavLink to="/damage-reports" className={navClass}>
+          <FiAlertTriangle size={16} />
+          <span className="nav-link__label">{isAdmin() ? 'Reports' : 'Report an issue'}</span>
         </NavLink>
 
-        {/* Labs List / Collapsible Section */}
-        <div style={{ marginTop: '0.75rem' }}>
-          <div
-            onClick={() => setLabsOpen(!labsOpen)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '0.5rem 0.75rem',
-              cursor: 'pointer',
-              color: 'var(--text-muted)',
-              fontSize: '0.75rem',
-              fontWeight: 600,
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-              userSelect: 'none',
-            }}
-          >
-            <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <FiLayers size={14} />
-              <span>Campus Labs</span>
-            </span>
-            {labsOpen ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
-          </div>
-
-          {labsOpen && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', paddingLeft: '0.5rem', marginTop: '0.25rem' }}>
-              {labs.length === 0 ? (
-                <div style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  Loading labs...
-                </div>
-              ) : (
-                labs.map((lab) => (
-                  <NavLink
-                    key={lab.lab_id}
-                    to={`/labs/${lab.lab_id}`}
-                    className={({ isActive }) =>
-                      `sidebar-link ${isActive ? 'active' : ''}`
-                    }
-                    style={{ fontSize: '0.84rem', padding: '0.5rem 0.75rem' }}
-                  >
-                    <span
-                      style={{
-                        width: '7px',
-                        height: '7px',
-                        borderRadius: '50%',
-                        backgroundColor:
-                          lab.state === 'OPEN'
-                            ? 'var(--color-success)'
-                            : lab.state === 'OCCUPIED'
-                            ? 'var(--color-primary)'
-                            : 'var(--color-danger)',
-                      }}
-                    />
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {lab.name}
-                    </span>
-                  </NavLink>
-                ))
-              )}
-            </div>
-          )}
+        <div className="nav-section">
+          <div className="nav-section__title">Labs</div>
+          {loading && labs.length === 0 && <div className="nav-link subtle">Loading…</div>}
+          {!loading && labs.length === 0 && <div className="nav-link subtle">No labs yet</div>}
+          {labs.map((lab) => {
+            const meta = labStateMeta(lab.state)
+            return (
+              <NavLink key={lab.lab_id} to={`/labs/${lab.lab_id}`} className={navClass} title={`${lab.lab_name} — ${meta.label}`}>
+                <span className={`dot tone-${meta.tone}`} aria-hidden="true" style={{ margin: '0 4px' }} />
+                <span className="nav-link__label">{lab.lab_name}</span>
+                <span className="nav-link__meta">{meta.label}</span>
+              </NavLink>
+            )
+          })}
         </div>
-      </div>
+      </nav>
 
-      <div className="sidebar-footer">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-          <span
-            style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              backgroundColor: 'var(--color-success)',
-              display: 'inline-block',
-            }}
-          />
-          <span>LabSense v1.0 • Smart Campus</span>
-        </div>
-      </div>
+      <div className="sidebar__footer">Campus lab monitor</div>
     </aside>
   )
 }

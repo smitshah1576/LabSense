@@ -1,47 +1,66 @@
-import React, { useState, useEffect, useCallback, useContext } from 'react'
-import { useParams, Link } from 'react-router-dom'
-import { labsApi, pcsApi, softwareApi, timetableApi, adminApi } from '../api/endpoints'
-import { AuthContext } from '../context/AuthContext'
+import React, { useCallback, useEffect, useState } from 'react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { FiCalendar, FiChevronRight, FiClock, FiHash, FiMonitor, FiPackage, FiPlus, FiRefreshCw, FiTrash2 } from 'react-icons/fi'
+import { adminApi, labsApi, pcsApi, timetableApi } from '../api/endpoints'
+import { useAuth } from '../hooks/useAuth'
 import { useLabState } from '../hooks/useLabState'
+import { useLabs } from '../context/LabsContext'
+import { useSoftwareSearch } from '../hooks/useSoftwareSearch'
+import { mergeLivePcs, summarizePcs } from '../lib/pcState'
+import { apiError, useDocumentTitle } from '../lib/hooks'
+import { formatClock } from '../lib/time'
 import PCGrid from '../components/Dashboard/PCGrid'
-import StatusIndicator from '../components/Dashboard/StatusIndicator'
+import TimetableView from '../components/Timetable/TimetableView'
 import SearchBar from '../components/Software/SearchBar'
 import SoftwareResults from '../components/Software/SoftwareResults'
-import TimetableView from '../components/Timetable/TimetableView'
-import CancelSlotModal from '../components/Timetable/CancelSlotModal'
-import {
-  FiArrowLeft,
-  FiClock,
-  FiMonitor,
-  FiSearch,
-  FiCalendar,
-  FiRefreshCw,
-  FiAlertTriangle,
-  FiPlus,
-} from 'react-icons/fi'
+import EmptyState from '../components/ui/EmptyState'
+import { StackBar, StateLegend, StatusPill } from '../components/ui/StatusPill'
+import { useConfirm, useToast } from '../components/ui/Feedback'
+
+const TABS = [
+  { key: 'workstations', label: 'Workstations', icon: FiMonitor },
+  { key: 'schedule', label: 'Schedule', icon: FiCalendar },
+  { key: 'software', label: 'Software', icon: FiPackage },
+]
+
+const LabSoftware = ({ labId, labName }) => {
+  const [query, setQuery] = useState('')
+  const search = useSoftwareSearch(query, labId)
+  return (
+    <>
+      <div style={{ maxWidth: 520, marginBottom: 16 }}>
+        <SearchBar value={query} onChange={setQuery} loading={search.loading} placeholder={`Search packages in ${labName}`} />
+      </div>
+      <SoftwareResults results={search.results} query={search.query} loading={search.loading} showLab={false} minLength={search.minLength} />
+    </>
+  )
+}
 
 const LabDetailPage = () => {
   const { labId } = useParams()
+  const navigate = useNavigate()
+  const [params, setParams] = useSearchParams()
+  const tab = TABS.some((t) => t.key === params.get('tab')) ? params.get('tab') : 'workstations'
+
+  const { isAdmin, isProfessor } = useAuth()
+  const { pcStates } = useLabState()
+  const { refresh: refreshLabs } = useLabs()
+  const toast = useToast()
+  const confirm = useConfirm()
+
   const [lab, setLab] = useState(null)
   const [pcs, setPcs] = useState([])
   const [timetable, setTimetable] = useState([])
   const [cancellations, setCancellations] = useState([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('workstations') // 'workstations' | 'timetable' | 'software'
+  const [notFound, setNotFound] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [busyPcId, setBusyPcId] = useState(null)
+  const [addingPc, setAddingPc] = useState(false)
 
-  const { isAdmin } = useContext(AuthContext)
+  useDocumentTitle(lab?.lab_name)
 
-  // Lab-specific software search
-  const [softwareQuery, setSoftwareQuery] = useState('')
-  const [softwareResults, setSoftwareResults] = useState([])
-  const [softwareLoading, setSoftwareLoading] = useState(false)
-
-  // Slot cancellation modal
-  const [cancellingSlot, setCancellingSlot] = useState(null)
-
-  const { pcStates, labStates } = useLabState()
-
-  const loadLabData = useCallback(async () => {
+  const load = useCallback(async () => {
     try {
       const [labRes, pcsRes, ttRes, cancelRes] = await Promise.all([
         labsApi.getLab(labId),
@@ -49,284 +68,221 @@ const LabDetailPage = () => {
         timetableApi.getLabTimetable(labId),
         timetableApi.getLabCancellations(labId),
       ])
-
       setLab(labRes.data)
       setPcs(pcsRes.data || [])
       setTimetable(ttRes.data || [])
       setCancellations(cancelRes.data || [])
+      setNotFound(false)
     } catch (err) {
-      console.error('Failed to load lab detail:', err)
+      if (err?.response?.status === 404) setNotFound(true)
+      else toast.error(apiError(err, 'Could not load this lab'))
     } finally {
       setLoading(false)
     }
-  }, [labId])
+  }, [labId, toast])
 
   useEffect(() => {
-    loadLabData()
-  }, [loadLabData])
+    setLoading(true)
+    setLab(null)
+    load()
+  }, [load])
 
-  // Merge PCs with WebSocket live states
-  const livePcs = pcs.map((pc) => {
-    const wsPcState = pcStates[pc.pc_id]
-    if (wsPcState) {
-      return {
-        ...pc,
-        current_state: wsPcState.status || pc.current_state,
-        session_active: wsPcState.session_active !== undefined ? wsPcState.session_active : pc.session_active,
-        screen_locked: wsPcState.screen_locked !== undefined ? wsPcState.screen_locked : pc.screen_locked,
-        cpu_percent: wsPcState.cpu_percent !== undefined ? wsPcState.cpu_percent : pc.cpu_percent,
-        idle_seconds: wsPcState.idle_seconds !== undefined ? wsPcState.idle_seconds : pc.idle_seconds,
-        last_heartbeat_at: wsPcState.last_heartbeat_at || pc.last_heartbeat_at,
-      }
-    }
-    return pc
-  })
+  const livePcs = mergeLivePcs(pcs, pcStates)
+  const counts = summarizePcs(livePcs)
 
-  // Merge Lab state
-  const currentLabState = labStates[labId] || lab?.state || 'OPEN'
+  const selectTab = (key) => setParams(key === 'workstations' ? {} : { tab: key }, { replace: true })
 
-  const handleSoftwareSearch = async (q) => {
-    setSoftwareQuery(q)
-    if (!q || q.length < 2) {
-      setSoftwareResults([])
-      return
-    }
-    setSoftwareLoading(true)
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    await load()
+    setRefreshing(false)
+  }
+
+  const handleToggleMaintenance = async (pc) => {
+    const entering = pc.current_state !== 'MAINTENANCE'
+    setBusyPcId(pc.pc_id)
     try {
-      const res = await softwareApi.searchLab(labId, q)
-      if (Array.isArray(res.data)) {
-        setSoftwareResults(res.data)
-      }
+      await pcsApi.toggleMaintenance(pc.pc_id, entering)
+      setPcs((prev) => prev.map((p) => (p.pc_id === pc.pc_id ? { ...p, current_state: entering ? 'MAINTENANCE' : 'AVAILABLE' } : p)))
+      toast.success(entering ? `${pc.pc_id} marked for maintenance` : `${pc.pc_id} returned to service`)
     } catch (err) {
-      console.error('Lab software search error:', err)
+      toast.error(apiError(err, 'Could not update maintenance'))
     } finally {
-      setSoftwareLoading(false)
+      setBusyPcId(null)
     }
   }
 
-  const handlePcStatusChange = (pcId, newStatus) => {
-    setPcs((prev) =>
-      prev.map((p) => (p.pc_id === pcId ? { ...p, current_state: newStatus } : p))
-    )
-  }
-
-  const handleCreatePC = async () => {
+  const handleAddPc = async () => {
+    setAddingPc(true)
     try {
-      await adminApi.createPC(labId)
-      loadLabData() // Refresh to fetch new PC
+      const res = await adminApi.createPC(labId)
+      toast.success(`Registered ${res.data.pc_id}. Deploy the agent with --pc-id ${res.data.pc_id}.`)
+      load()
     } catch (err) {
-      alert(err.response?.data?.detail || 'Failed to create PC')
+      toast.error(apiError(err, 'Could not add a workstation'))
+    } finally {
+      setAddingPc(false)
     }
   }
 
-  const handleDeletePC = async (pcId) => {
+  const handleDeletePc = async (pc) => {
+    const ok = await confirm({
+      title: `Remove ${pc.pc_id}?`,
+      message: 'Its state history and damage reports are deleted too. A running agent with this ID will be rejected.',
+      confirmLabel: 'Remove workstation',
+      tone: 'danger',
+    })
+    if (!ok) return
     try {
-      await adminApi.deletePC(pcId)
-      loadLabData()
+      await adminApi.deletePC(pc.pc_id)
+      toast.success(`${pc.pc_id} removed`)
+      load()
     } catch (err) {
-      alert(err.response?.data?.detail || 'Failed to delete PC')
+      toast.error(apiError(err, 'Could not remove the workstation'))
     }
   }
 
-  const availablePcCount = livePcs.filter(
-    (p) => (p.current_state || 'AVAILABLE').toUpperCase() === 'AVAILABLE'
-  ).length
+  const handleDeleteLab = async () => {
+    const ok = await confirm({
+      title: `Delete ${lab.lab_name}?`,
+      message: `This permanently deletes the lab, its ${counts.total} ${
+        counts.total === 1 ? 'workstation' : 'workstations'
+      }, their history and reports, and its timetable.`,
+      confirmLabel: 'Delete lab',
+      tone: 'danger',
+    })
+    if (!ok) return
+    try {
+      await adminApi.deleteLab(labId)
+      toast.success(`${lab.lab_name} deleted`)
+      refreshLabs()
+      navigate('/')
+    } catch (err) {
+      toast.error(apiError(err, 'Could not delete the lab'))
+    }
+  }
+
+  const breadcrumb = (
+    <>
+      <Link to="/">Overview</Link>
+      <FiChevronRight size={13} />
+      <span style={{ color: 'var(--text-2)' }}>{lab?.lab_name || labId}</span>
+    </>
+  )
 
   if (loading && !lab) {
     return (
-      <div className="page-container">
-        <div className="glass-panel skeleton" style={{ height: '140px' }} />
-        <div className="glass-panel skeleton" style={{ height: '300px' }} />
-      </div>
+      <>
+        <div className="skeleton" style={{ height: 96, marginBottom: 24 }} />
+        <div className="grid grid--pcs">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <div key={i} className="skeleton" style={{ height: 196 }} />
+          ))}
+        </div>
+      </>
     )
   }
 
-  if (!lab) {
+  if (notFound || !lab) {
     return (
-      <div className="page-container">
-        <div className="glass-panel" style={{ textAlign: 'center', padding: '3rem 1rem' }}>
-          <p>Lab #{labId} not found.</p>
-          <Link to="/" className="btn btn-primary" style={{ marginTop: '1rem' }}>
-            Back to Dashboard
-          </Link>
-        </div>
+      <div className="card">
+        <EmptyState
+          icon={FiMonitor}
+          title="Lab not found"
+          description={`There is no lab with the ID “${labId}”. It may have been deleted.`}
+          action={
+            <Link to="/" className="btn btn--secondary">
+              Back to overview
+            </Link>
+          }
+        />
       </div>
     )
   }
 
   return (
-    <div className="page-container">
-      {/* Navigation Breadcrumb */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <Link to="/" className="btn btn-ghost btn-sm" style={{ paddingLeft: '0.4rem' }}>
-          <FiArrowLeft size={16} />
-          <span>All Labs</span>
-        </Link>
-      </div>
+    <>
+      <nav className="breadcrumb" aria-label="Breadcrumb">
+        {breadcrumb}
+      </nav>
 
-      {/* Lab Header Hero Card */}
-      <div
-        className="glass-card"
-        style={{
-          padding: '1.75rem',
-          background: 'linear-gradient(135deg, hsla(220, 20%, 14%, 0.85) 0%, hsla(220, 20%, 8%, 0.95) 100%)',
-          borderLeft: `4px solid ${
-            currentLabState === 'OPEN'
-              ? 'var(--color-success)'
-              : currentLabState === 'OCCUPIED'
-              ? 'var(--color-primary)'
-              : 'var(--color-danger)'
-          }`,
-        }}
-      >
-        <div className="flex-between" style={{ flexWrap: 'wrap', gap: '1rem' }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
-              <h1 style={{ fontSize: '1.85rem', fontWeight: 800, letterSpacing: '-0.02em' }}>
-                {lab.lab_name}
-              </h1>
-              <StatusIndicator state={currentLabState} />
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                <FiClock size={14} style={{ color: 'var(--color-warning)' }} />
-                <span>
-                  Operating Hours: {lab.operating_start_time} – {lab.operating_end_time}
-                </span>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                <FiMonitor size={14} style={{ color: 'var(--color-success)' }} />
-                <span>
-                  Workstations: <strong style={{ color: 'var(--color-success)' }}>{availablePcCount}</strong> / {livePcs.length} Available
-                </span>
-              </div>
-            </div>
+      <header className="lab-hero">
+        <div style={{ minWidth: 0 }}>
+          <div className="lab-hero__title">
+            <h1 className="page-header__title">{lab.lab_name}</h1>
+            <StatusPill kind="lab" state={lab.state} size="lg" />
           </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            <Link
-              to="/damage-reports"
-              className="btn btn-secondary btn-sm"
-              title="Report an issue in this lab"
-            >
-              <FiAlertTriangle size={14} style={{ color: 'var(--color-warning)' }} />
-              <span>Report Issue</span>
-            </Link>
-
-            <button
-              onClick={loadLabData}
-              className="btn btn-ghost btn-sm"
-              title="Refresh data"
-            >
-              <FiRefreshCw size={14} />
+          <div className="lab-hero__meta">
+            <span className="inline-meta">
+              <FiClock size={14} />
+              <span className="num">
+                Open {formatClock(lab.operating_start_time)}–{formatClock(lab.operating_end_time)}
+              </span>
+            </span>
+            <span className="inline-meta">
+              <FiHash size={14} />
+              <span className="mono">{lab.lab_id}</span>
+            </span>
+          </div>
+          <div className="page-header__actions" style={{ marginTop: 16 }}>
+            <button type="button" className="btn btn--secondary btn--sm" onClick={handleRefresh} disabled={refreshing}>
+              <FiRefreshCw size={13} className={refreshing ? 'spin' : ''} /> Refresh
             </button>
+            {isAdmin() && (
+              <button type="button" className="btn btn--danger-ghost btn--sm" onClick={handleDeleteLab}>
+                <FiTrash2 size={13} /> Delete lab
+              </button>
+            )}
           </div>
         </div>
-      </div>
 
-      {/* Tabs Navigation */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          borderBottom: '1px solid var(--border-glass)',
-          paddingBottom: '0.5rem',
-        }}
-      >
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button
-            onClick={() => setActiveTab('workstations')}
-            className={`btn ${activeTab === 'workstations' ? 'btn-primary' : 'btn-ghost'}`}
-            style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }}
-          >
-            <FiMonitor size={15} />
-            <span>Live Workstations ({livePcs.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('timetable')}
-            className={`btn ${activeTab === 'timetable' ? 'btn-primary' : 'btn-ghost'}`}
-            style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }}
-          >
-            <FiCalendar size={15} />
-            <span>Lab Timetable & Schedule</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('software')}
-            className={`btn ${activeTab === 'software' ? 'btn-primary' : 'btn-ghost'}`}
-            style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }}
-          >
-            <FiSearch size={15} />
-            <span>Installed Software Locator</span>
-          </button>
-        </div>
-        
-        {isAdmin() && activeTab === 'workstations' && (
-          <button
-            onClick={handleCreatePC}
-            className="btn btn-primary btn-sm"
-          >
-            <FiPlus size={14} />
-            <span>Add PC</span>
-          </button>
-        )}
-      </div>
-
-      {/* Tab 1: Live PC Grid */}
-      {activeTab === 'workstations' && (
-        <div>
-          <PCGrid pcs={livePcs} onStatusChanged={handlePcStatusChange} onDeletePC={handleDeletePC} />
-        </div>
-      )}
-
-      {/* Tab 2: Timetable */}
-      {activeTab === 'timetable' && (
-        <div>
-          <TimetableView
-            labId={labId}
-            timetable={timetable}
-            cancellations={cancellations}
-            onSlotCancelRequested={(slot) => setCancellingSlot(slot)}
-            onTimetableChanged={loadLabData}
-          />
-        </div>
-      )}
-
-      {/* Tab 3: Lab Software Search */}
-      {activeTab === 'software' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          <div className="glass-card" style={{ padding: '1.25rem' }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.75rem', color: 'var(--text-secondary)' }}>
-              Search installed applications in {lab.lab_name}:
-            </h3>
-            <SearchBar
-              onSearch={handleSoftwareSearch}
-              placeholder={`Search packages inside ${lab.lab_name} (e.g., Anaconda, Docker, Eclipse, GDB)...`}
-              loading={softwareLoading}
-            />
+        <div className="card lab-hero__summary" style={{ padding: 16 }}>
+          <div className="lab-card__avail">
+            <span className="lab-card__avail-num">{counts.free}</span>
+            <span className="lab-card__avail-label">
+              of {counts.total} {counts.total === 1 ? 'workstation' : 'workstations'} free
+            </span>
           </div>
-
-          <SoftwareResults
-            results={softwareResults}
-            searchQuery={softwareQuery}
-            loading={softwareLoading}
-          />
+          <StackBar counts={counts} />
+          <StateLegend counts={counts} />
         </div>
-      )}
+      </header>
 
-      {/* Cancellation Modal */}
-      {cancellingSlot && (
-        <CancelSlotModal
-          slot={cancellingSlot}
-          onClose={() => setCancellingSlot(null)}
-          onSlotCancelled={loadLabData}
+      <div className="tabs" role="tablist">
+        {TABS.map(({ key, label, icon: Icon }) => (
+          <button key={key} type="button" role="tab" className="tab" aria-selected={tab === key} onClick={() => selectTab(key)}>
+            <Icon size={15} />
+            {label}
+            {key === 'workstations' && <span className="tab__count">{counts.total}</span>}
+            {key === 'schedule' && <span className="tab__count">{timetable.length}</span>}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'workstations' && (
+        <PCGrid
+          pcs={livePcs}
+          canMaintain={isProfessor()}
+          canDelete={isAdmin()}
+          busyPcId={busyPcId}
+          onToggleMaintenance={handleToggleMaintenance}
+          onDelete={handleDeletePc}
+          actions={
+            isAdmin() && (
+              <button type="button" className="btn btn--primary btn--sm" onClick={handleAddPc} disabled={addingPc}>
+                <FiPlus size={14} /> {addingPc ? 'Adding…' : 'Add workstation'}
+              </button>
+            )
+          }
         />
       )}
-    </div>
+
+      {tab === 'schedule' && (
+        <TimetableView labId={labId} timetable={timetable} cancellations={cancellations} onChanged={() => { load(); refreshLabs() }} />
+      )}
+
+      {tab === 'software' && <LabSoftware labId={labId} labName={lab.lab_name} />}
+    </>
   )
 }
 

@@ -1,7 +1,8 @@
 import React from 'react'
-import { Routes, Route } from 'react-router-dom'
+import { Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import { WebSocketProvider } from './context/WebSocketContext'
+import { LabsProvider } from './context/LabsContext'
 import ProtectedRoute from './components/Auth/ProtectedRoute'
 import Layout from './components/Layout/Layout'
 
@@ -18,74 +19,33 @@ function App() {
     <AuthProvider>
       <WebSocketProvider>
         <Routes>
-          {/* Public Authentication Route */}
           <Route path="/login" element={<LoginPage />} />
 
-          {/* Protected Routes wrapped in Layout */}
+          {/* Every signed-in page shares one Layout, so the sidebar stays
+              mounted (and does not refetch) while navigating. */}
           <Route
-            path="/"
             element={
               <ProtectedRoute>
-                <Layout>
-                  <DashboardPage />
-                </Layout>
+                <LabsProvider>
+                  <Layout />
+                </LabsProvider>
               </ProtectedRoute>
             }
-          />
-
-          <Route
-            path="/labs/:labId"
-            element={
-              <ProtectedRoute>
-                <Layout>
-                  <LabDetailPage />
-                </Layout>
-              </ProtectedRoute>
-            }
-          />
-
-          <Route
-            path="/software"
-            element={
-              <ProtectedRoute>
-                <Layout>
-                  <SoftwarePage />
-                </Layout>
-              </ProtectedRoute>
-            }
-          />
-
-          <Route
-            path="/timetable"
-            element={
-              <ProtectedRoute allowedRoles={['ADMIN', 'PROFESSOR']}>
-                <Layout>
+          >
+            <Route path="/" element={<DashboardPage />} />
+            <Route path="/labs/:labId" element={<LabDetailPage />} />
+            <Route path="/software" element={<SoftwarePage />} />
+            <Route
+              path="/timetable"
+              element={
+                <ProtectedRoute allowedRoles={['ADMIN', 'PROFESSOR']}>
                   <TimetablePage />
-                </Layout>
-              </ProtectedRoute>
-            }
-          />
-
-          <Route
-            path="/damage-reports"
-            element={
-              <ProtectedRoute>
-                <Layout>
-                  <DamageReportsPage />
-                </Layout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Catch-all 404 Route */}
-          <Route
-            path="*"
-            element={
-              <Layout>
-                <NotFoundPage />
-              </Layout>
-            }
-          />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="/damage-reports" element={<DamageReportsPage />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Route>
         </Routes>
       </WebSocketProvider>
     </AuthProvider>

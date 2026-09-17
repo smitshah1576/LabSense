@@ -1,159 +1,75 @@
-import React, { useState } from 'react'
-import { damageReportsApi } from '../../api/endpoints'
-import {
-  FiCheck,
-  FiX,
-  FiClock,
-  FiAlertCircle,
-  FiUser,
-  FiMonitor,
-} from 'react-icons/fi'
+import React from 'react'
+import { FiCheck, FiInbox, FiMonitor, FiTool, FiX } from 'react-icons/fi'
+import EmptyState from '../ui/EmptyState'
+import { formatDateTime, relativeTime } from '../../lib/time'
 
-const ReportReviewList = ({ reports = [], onReportResolved, loading = false }) => {
-  const [resolvingId, setResolvingId] = useState(null)
+const STATUS = {
+  PENDING: { label: 'Pending', tone: 'maintenance' },
+  APPROVED: { label: 'Approved', tone: 'available' },
+  DISMISSED: { label: 'Dismissed', tone: 'neutral' },
+}
 
-  const handleResolve = async (reportId, status) => {
-    setResolvingId(reportId)
-    try {
-      await damageReportsApi.resolveReport(reportId, status)
-      if (onReportResolved) onReportResolved()
-    } catch (err) {
-      console.error('Failed to resolve damage report:', err)
-      alert(err.response?.data?.detail || 'Failed to update report status')
-    } finally {
-      setResolvingId(null)
-    }
-  }
-
-  const formatDate = (isoString) => {
-    if (!isoString) return ''
-    try {
-      const d = new Date(isoString)
-      return `${d.toLocaleDateString()} at ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-    } catch {
-      return isoString
-    }
-  }
-
-  const getStatusBadge = (status) => {
-    switch ((status || '').toUpperCase()) {
-      case 'PENDING':
-        return <span className="badge badge-maintenance">Pending Review</span>
-      case 'APPROVED':
-        return <span className="badge badge-closed">Approved (In Maint.)</span>
-      case 'DISMISSED':
-        return <span className="badge badge-ghost" style={{ border: '1px solid var(--border-subtle)' }}>Dismissed</span>
-      default:
-        return <span className="badge badge-ghost">{status}</span>
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className="glass-panel" style={{ textAlign: 'center', padding: '2.5rem' }}>
-        <p style={{ color: 'var(--text-secondary)' }}>Loading damage report queue...</p>
-      </div>
-    )
-  }
+const ReportReviewList = ({ reports = [], loading, resolvingId, onResolve, emptyTitle, emptyDescription }) => {
+  if (loading && reports.length === 0) return <div className="skeleton" style={{ height: 180 }} />
 
   if (reports.length === 0) {
     return (
-      <div className="glass-panel" style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
-        <FiCheck size={40} style={{ opacity: 0.4, color: 'var(--color-success)', marginBottom: '0.5rem' }} />
-        <p>No damage reports in this queue.</p>
+      <div className="card">
+        <EmptyState icon={FiInbox} title={emptyTitle} description={emptyDescription} />
       </div>
     )
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+    <div className="card" style={{ opacity: loading ? 0.6 : 1 }}>
       {reports.map((report) => {
-        const isPending = (report.status || '').toUpperCase() === 'PENDING'
-        const isResolving = resolvingId === report.id
-
+        const status = STATUS[(report.status || '').toUpperCase()] || { label: report.status, tone: 'neutral' }
+        const pending = report.status === 'PENDING'
+        const busy = resolvingId === report.report_id
         return (
-          <div
-            key={report.id}
-            className="glass-card"
-            style={{
-              padding: '1.25rem',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '0.75rem',
-              borderLeft: isPending ? '3px solid var(--color-warning)' : '1px solid var(--border-glass)',
-            }}
-          >
-            <div className="flex-between">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.35rem',
-                    fontFamily: 'JetBrains Mono, monospace',
-                    fontWeight: 600,
-                    fontSize: '0.95rem',
-                    color: 'var(--text-primary)',
-                  }}
+          <article key={report.report_id} className="report">
+            <div style={{ minWidth: 0 }}>
+              <div className="report__head">
+                <span className="inline-meta" style={{ fontWeight: 500 }}>
+                  <FiMonitor size={14} />
+                  <span className="mono">{report.pc_id}</span>
+                </span>
+                <span className={`pill tone-${status.tone}`}>
+                  <span className="pill__dot" aria-hidden="true" />
+                  {status.label}
+                </span>
+              </div>
+              <p className="report__text">{report.issue_description}</p>
+              <div className="report__meta">
+                <span title={formatDateTime(report.created_at)}>Reported {relativeTime(report.created_at)}</span>
+                <span>by user #{report.reported_by}</span>
+                <span className="subtle">Report #{report.report_id}</span>
+                {!pending && report.resolved_at && (
+                  <span>
+                    {status.label} {relativeTime(report.resolved_at)}
+                    {report.resolved_by ? ` by user #${report.resolved_by}` : ''}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {pending && onResolve && (
+              <div className="report__actions">
+                <button type="button" className="btn btn--secondary btn--sm" onClick={() => onResolve(report, 'DISMISSED')} disabled={busy}>
+                  <FiX size={13} /> Dismiss
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--primary btn--sm"
+                  onClick={() => onResolve(report, 'APPROVED')}
+                  disabled={busy}
+                  title="Approve and put this workstation into maintenance"
                 >
-                  <FiMonitor size={15} style={{ color: 'var(--color-primary)' }} />
-                  <span>PC: {report.pc_id}</span>
-                </div>
-                {getStatusBadge(report.status)}
+                  {busy ? <FiCheck size={13} /> : <FiTool size={13} />} Approve
+                </button>
               </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                <FiClock size={12} />
-                <span>{formatDate(report.created_at)}</span>
-              </div>
-            </div>
-
-            <div
-              style={{
-                fontSize: '0.875rem',
-                color: 'var(--text-secondary)',
-                lineHeight: 1.5,
-                background: 'hsla(220, 20%, 8%, 0.5)',
-                padding: '0.75rem 0.9rem',
-                borderRadius: 'var(--radius-sm)',
-                border: '1px solid var(--border-glass)',
-              }}
-            >
-              {report.description}
-            </div>
-
-            <div className="flex-between" style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                <FiUser size={12} />
-                <span>Reported by User #{report.reported_by}</span>
-              </div>
-
-              {isPending && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <button
-                    onClick={() => handleResolve(report.id, 'DISMISSED')}
-                    disabled={isResolving}
-                    className="btn btn-ghost btn-sm"
-                    style={{ color: 'var(--text-muted)' }}
-                    title="Dismiss report as invalid/resolved"
-                  >
-                    <FiX size={14} />
-                    <span>Dismiss</span>
-                  </button>
-
-                  <button
-                    onClick={() => handleResolve(report.id, 'APPROVED')}
-                    disabled={isResolving}
-                    className="btn btn-danger btn-sm"
-                    title="Approve report (puts PC into Maintenance mode)"
-                  >
-                    <FiCheck size={14} />
-                    <span>{isResolving ? 'Processing...' : 'Approve & Put in Maintenance'}</span>
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
+            )}
+          </article>
         )
       })}
     </div>

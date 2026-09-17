@@ -1,14 +1,26 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
+import { Outlet, useLocation } from 'react-router-dom'
 import Navbar from './Navbar'
 import Sidebar from './Sidebar'
 
-const Layout = ({ children }) => {
+const Layout = () => {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const location = useLocation()
+
+  // Close the mobile drawer whenever the route changes.
+  useEffect(() => {
+    setMenuOpen(false)
+  }, [location.pathname])
+
   return (
-    <div className="app-container">
-      <Sidebar />
-      <div className="main-wrapper">
-        <Navbar />
-        <main className="main-content">{children}</main>
+    <div className="shell">
+      <Sidebar open={menuOpen} />
+      {menuOpen && <div className="sidebar-scrim" onClick={() => setMenuOpen(false)} aria-hidden="true" />}
+      <div className="shell__main">
+        <Navbar onMenu={() => setMenuOpen(true)} />
+        <main className="content" id="main">
+          <Outlet />
+        </main>
       </div>
     </div>
   )

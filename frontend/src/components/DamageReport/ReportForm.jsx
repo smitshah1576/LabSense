@@ -1,204 +1,149 @@
-import React, { useState, useEffect } from 'react'
-import { labsApi, pcsApi, damageReportsApi } from '../../api/endpoints'
-import { FiAlertTriangle, FiCheckCircle, FiSend } from 'react-icons/fi'
+import React, { useEffect, useState } from 'react'
+import { FiCheckCircle, FiSend } from 'react-icons/fi'
+import { damageReportsApi, pcsApi } from '../../api/endpoints'
+import { useLabs } from '../../context/LabsContext'
+import { apiError } from '../../lib/hooks'
+import { useToast } from '../ui/Feedback'
 
-const ReportForm = ({ onReportSubmitted, prefilledPcId = '' }) => {
-  const [labs, setLabs] = useState([])
-  const [selectedLab, setSelectedLab] = useState('')
-  const [labPcs, setLabPcs] = useState([])
-  const [pcId, setPcId] = useState(prefilledPcId)
+const MAX_LENGTH = 1000
+
+const ReportForm = ({ initialLabId = '', initialPcId = '', onSubmitted }) => {
+  const toast = useToast()
+  const { labs } = useLabs()
+  const [labId, setLabId] = useState(initialLabId)
+  const [pcs, setPcs] = useState([])
+  const [pcsLoading, setPcsLoading] = useState(false)
+  const [pcId, setPcId] = useState(initialPcId)
   const [description, setDescription] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [successMsg, setSuccessMsg] = useState('')
-  const [errorMsg, setErrorMsg] = useState('')
+  const [submittedFor, setSubmittedFor] = useState(null)
+
+  // Default to the first lab once the list arrives.
+  useEffect(() => {
+    if (!labId && labs.length > 0) setLabId(labs[0].lab_id)
+  }, [labs, labId])
 
   useEffect(() => {
-    labsApi
-      .getLabs()
+    if (!labId) return
+    let active = true
+    setPcsLoading(true)
+    pcsApi
+      .getLabPCs(labId)
       .then((res) => {
-        if (Array.isArray(res.data)) {
-          setLabs(res.data)
-          if (res.data.length > 0 && !selectedLab) {
-            setSelectedLab(res.data[0].id)
-          }
-        }
+        if (!active) return
+        const list = (res.data || []).slice().sort((a, b) => a.pc_id.localeCompare(b.pc_id, undefined, { numeric: true }))
+        setPcs(list)
+        setPcId((current) => (list.some((p) => p.pc_id === current) ? current : list[0]?.pc_id || ''))
       })
-      .catch((err) => console.warn('Could not load labs for report form:', err))
-  }, [])
-
-  useEffect(() => {
-    if (selectedLab) {
-      pcsApi
-        .getLabPCs(selectedLab)
-        .then((res) => {
-          if (Array.isArray(res.data)) {
-            setLabPcs(res.data)
-            if (res.data.length > 0 && !prefilledPcId) {
-              setPcId(res.data[0].id)
-            }
-          }
-        })
-        .catch((err) => console.warn('Could not load PCs for selected lab:', err))
+      .catch(() => active && setPcs([]))
+      .finally(() => active && setPcsLoading(false))
+    return () => {
+      active = false
     }
-  }, [selectedLab, prefilledPcId])
-
-  useEffect(() => {
-    if (prefilledPcId) {
-      setPcId(prefilledPcId)
-    }
-  }, [prefilledPcId])
+  }, [labId])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!pcId || !description.trim()) {
-      setErrorMsg('Please select a PC and provide a description of the issue.')
-      return
-    }
-
+    if (!pcId || !description.trim()) return
     setSubmitting(true)
-    setErrorMsg('')
-    setSuccessMsg('')
-
     try {
       await damageReportsApi.submitReport(pcId, description.trim())
-      setSuccessMsg(`Damage report for workstation "${pcId}" submitted successfully!`)
+      setSubmittedFor(pcId)
       setDescription('')
-      if (onReportSubmitted) onReportSubmitted()
+      toast.success(`Report sent for ${pcId}`)
+      onSubmitted?.()
     } catch (err) {
-      console.error('Failed to submit report:', err)
-      setErrorMsg(err.response?.data?.detail || 'Failed to submit report. Please try again.')
+      toast.error(apiError(err, 'Could not send the report'))
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <div className="glass-card" style={{ padding: '1.5rem' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '1.25rem' }}>
-        <div
-          style={{
-            width: '32px',
-            height: '32px',
-            borderRadius: 'var(--radius-sm)',
-            background: 'hsla(38, 92%, 50%, 0.15)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: 'var(--color-warning)',
-          }}
-        >
-          <FiAlertTriangle size={18} />
-        </div>
+    <form className="card" onSubmit={handleSubmit}>
+      <div className="card__header">
         <div>
-          <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-            Report Hardware or Software Issue
-          </h3>
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-            Notify lab administrators of faulty monitors, peripherals, or software glitches
-          </p>
+          <div className="card__title">Report an issue</div>
+          <div className="subtle" style={{ fontSize: 12.5 }}>
+            Broken hardware, missing peripherals, software that won't start.
+          </div>
         </div>
       </div>
 
-      {successMsg && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            padding: '0.85rem',
-            borderRadius: 'var(--radius-sm)',
-            background: 'hsla(142, 71%, 45%, 0.15)',
-            border: '1px solid var(--color-success)',
-            color: 'var(--color-success)',
-            fontSize: '0.875rem',
-            marginBottom: '1rem',
-          }}
-        >
-          <FiCheckCircle size={18} />
-          <span>{successMsg}</span>
-        </div>
-      )}
+      <div className="card__body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {submittedFor && (
+          <div className="alert alert--success" role="status">
+            <FiCheckCircle size={15} />
+            <span>
+              Thanks — your report for <span className="mono">{submittedFor}</span> is with the lab administrators.
+            </span>
+          </div>
+        )}
 
-      {errorMsg && (
-        <div
-          style={{
-            padding: '0.85rem',
-            borderRadius: 'var(--radius-sm)',
-            background: 'hsla(0, 84%, 60%, 0.15)',
-            border: '1px solid var(--color-danger)',
-            color: 'var(--color-danger)',
-            fontSize: '0.875rem',
-            marginBottom: '1rem',
-          }}
-        >
-          {errorMsg}
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-          <div className="input-group">
-            <label className="input-label">Filter by Lab</label>
-            <select
-              className="select"
-              value={selectedLab}
-              onChange={(e) => setSelectedLab(e.target.value)}
-            >
-              {labs.map((l) => (
-                <option key={l.id} value={l.id} style={{ background: '#131722' }}>
-                  {l.name}
+        <div className="field-row">
+          <div className="field">
+            <label className="field__label" htmlFor="report_lab">
+              Lab
+            </label>
+            <select id="report_lab" className="select" value={labId} onChange={(e) => setLabId(e.target.value)} required>
+              {labs.map((lab) => (
+                <option key={lab.lab_id} value={lab.lab_id}>
+                  {lab.lab_name}
                 </option>
               ))}
             </select>
           </div>
-
-          <div className="input-group">
-            <label className="input-label">Workstation / PC</label>
+          <div className="field">
+            <label className="field__label" htmlFor="report_pc">
+              Workstation
+            </label>
             <select
-              className="select"
+              id="report_pc"
+              className="select mono"
               value={pcId}
               onChange={(e) => setPcId(e.target.value)}
+              disabled={pcsLoading || pcs.length === 0}
               required
             >
-              {labPcs.length === 0 ? (
-                <option value="" style={{ background: '#131722' }}>
-                  No PCs in selected lab
+              {pcs.length === 0 && <option value="">{pcsLoading ? 'Loading…' : 'No workstations in this lab'}</option>}
+              {pcs.map((pc) => (
+                <option key={pc.pc_id} value={pc.pc_id}>
+                  {pc.pc_id}
                 </option>
-              ) : (
-                labPcs.map((pc) => (
-                  <option key={pc.id} value={pc.id} style={{ background: '#131722' }}>
-                    {pc.hostname ? `${pc.hostname} (${pc.id})` : pc.id}
-                  </option>
-                ))
-              )}
+              ))}
             </select>
           </div>
         </div>
 
-        <div className="input-group">
-          <label className="input-label">Detailed Description of Problem</label>
+        <div className="field">
+          <label className="field__label" htmlFor="report_desc">
+            What's wrong?
+          </label>
           <textarea
+            id="report_desc"
             className="textarea"
-            rows={4}
-            placeholder="Describe the issue (e.g., keyboard keys unresponsive, blue screen on boot, missing mouse)..."
+            rows={5}
+            maxLength={MAX_LENGTH}
+            placeholder="e.g. The monitor flickers and goes black after a few minutes."
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={(e) => {
+              setDescription(e.target.value)
+              setSubmittedFor(null)
+            }}
             required
           />
+          <span className="field__hint num" style={{ textAlign: 'right' }}>
+            {description.length}/{MAX_LENGTH}
+          </span>
         </div>
+      </div>
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={submitting || !pcId}
-          >
-            <FiSend size={15} />
-            <span>{submitting ? 'Submitting...' : 'Submit Damage Report'}</span>
-          </button>
-        </div>
-      </form>
-    </div>
+      <div className="modal__foot" style={{ borderRadius: '0 0 12px 12px' }}>
+        <button type="submit" className="btn btn--primary" disabled={submitting || !pcId || !description.trim()}>
+          <FiSend size={14} /> {submitting ? 'Sending…' : 'Send report'}
+        </button>
+      </div>
+    </form>
   )
 }
 

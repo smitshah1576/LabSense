@@ -1,282 +1,276 @@
-import React, { useState, useEffect, useContext } from 'react'
-import { labsApi, softwareApi, adminApi } from '../api/endpoints'
-import { AuthContext } from '../context/AuthContext'
+import React, { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { FiLayers, FiPlus, FiRefreshCw, FiSearch } from 'react-icons/fi'
+import { adminApi } from '../api/endpoints'
+import { useAuth } from '../hooks/useAuth'
 import { useLabState } from '../hooks/useLabState'
+import { useLabs } from '../context/LabsContext'
+import { useLabPcs } from '../hooks/useLabPcs'
+import { mergeLivePcs, summarizePcs } from '../lib/pcState'
+import { apiError, useDocumentTitle } from '../lib/hooks'
 import LabCard from '../components/Dashboard/LabCard'
-import SearchBar from '../components/Software/SearchBar'
-import SoftwareResults from '../components/Software/SoftwareResults'
-import {
-  FiGrid,
-  FiLayers,
-  FiMonitor,
-  FiActivity,
-  FiRefreshCw,
-  FiCheckCircle,
-  FiPlus,
-} from 'react-icons/fi'
+import PageHeader from '../components/ui/PageHeader'
+import EmptyState from '../components/ui/EmptyState'
+import Modal from '../components/ui/Modal'
+import { useToast } from '../components/ui/Feedback'
+
+const Stat = ({ label, value, total, foot, tone }) => (
+  <div className="card stat">
+    <div className="stat__label">
+      {tone && <span className={`dot tone-${tone}`} aria-hidden="true" />}
+      {label}
+    </div>
+    <div className="stat__value">
+      {value}
+      {total !== undefined && <small>/ {total}</small>}
+    </div>
+    {foot && <div className="stat__foot">{foot}</div>}
+  </div>
+)
+
+const EMPTY_LAB = { lab_id: '', lab_name: '', operating_start_time: '08:00', operating_end_time: '20:00' }
 
 const DashboardPage = () => {
-  const [labs, setLabs] = useState([])
-  const [loading, setLoading] = useState(true)
+  useDocumentTitle('Overview')
+  const navigate = useNavigate()
+  const toast = useToast()
+  const { isAdmin } = useAuth()
+  const { pcStates } = useLabState()
+  const { labs, loading: labsLoading, refresh: refreshLabs } = useLabs()
+  const { pcsByLab, loading: pcsLoading, refresh: refreshPcs } = useLabPcs(labs)
+
+  const [query, setQuery] = useState('')
   const [refreshing, setRefreshing] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState([])
-  const [searchLoading, setSearchLoading] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [newLab, setNewLab] = useState(EMPTY_LAB)
+  const [saving, setSaving] = useState(false)
 
-  const { isAdmin } = useContext(AuthContext)
-  const [showCreateModal, setShowCreateModal] = useState(false)
-  const [newLabData, setNewLabData] = useState({ lab_id: '', lab_name: '', operating_start_time: '08:00', operating_end_time: '20:00' })
+  const perLab = useMemo(() => {
+    const out = {}
+    labs.forEach((lab) => {
+      out[lab.lab_id] = summarizePcs(mergeLivePcs(pcsByLab[lab.lab_id] || [], pcStates))
+    })
+    return out
+  }, [labs, pcsByLab, pcStates])
 
-  const { labStates, pcStates } = useLabState()
+  const totals = useMemo(() => {
+    const t = { total: 0, free: 0, IN_USE: 0, AVAILABLE_SLEEP: 0, MAINTENANCE: 0 }
+    Object.values(perLab).forEach((c) => {
+      t.total += c.total
+      t.free += c.free
+      t.IN_USE += c.IN_USE
+      t.AVAILABLE_SLEEP += c.AVAILABLE_SLEEP
+      t.MAINTENANCE += c.MAINTENANCE
+    })
+    return t
+  }, [perLab])
 
-  const fetchLabs = async (isManualRefresh = false) => {
-    if (isManualRefresh) setRefreshing(true)
-    try {
-      const res = await labsApi.getLabs()
-      if (Array.isArray(res.data)) {
-        setLabs(res.data)
-      }
-    } catch (err) {
-      console.error('Error fetching labs:', err)
-    } finally {
-      setLoading(false)
-      if (isManualRefresh) setRefreshing(false)
-    }
+  const openLabs = labs.filter((l) => l.state === 'OPEN').length
+  const inSession = labs.filter((l) => l.state === 'OCCUPIED').length
+  const occupancy = totals.total ? Math.round((totals.IN_USE / totals.total) * 100) : 0
+  const loading = labsLoading || pcsLoading
+
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    await Promise.all([refreshLabs(), refreshPcs()])
+    setRefreshing(false)
   }
 
-  useEffect(() => {
-    fetchLabs()
-  }, [])
-
-  // Sync labs with real-time websocket updates
-  const mergedLabs = labs.map((lab) => {
-    const liveLabState = labStates[lab.lab_id]
-    return {
-      ...lab,
-      state: liveLabState || lab.state,
-    }
-  })
-
-  // Handle global software search from dashboard
-  const handleSearch = async (q) => {
-    setSearchQuery(q)
-    if (!q || q.length < 2) {
-      setSearchResults([])
-      return
-    }
-    setSearchLoading(true)
-    try {
-      const res = await softwareApi.searchGlobal(q)
-      if (Array.isArray(res.data)) {
-        setSearchResults(res.data)
-      }
-    } catch (err) {
-      console.error('Software search error:', err)
-    } finally {
-      setSearchLoading(false)
-    }
-  }
-
-  const handleCreateLab = async (e) => {
+  const handleSearch = (e) => {
     e.preventDefault()
+    const q = query.trim()
+    navigate(q ? `/software?q=${encodeURIComponent(q)}` : '/software')
+  }
+
+  const handleCreate = async (e) => {
+    e.preventDefault()
+    setSaving(true)
     try {
-      await adminApi.createLab(newLabData)
-      setShowCreateModal(false)
-      setNewLabData({ lab_id: '', lab_name: '', operating_start_time: '08:00', operating_end_time: '20:00' })
-      fetchLabs()
+      await adminApi.createLab({ ...newLab, lab_id: newLab.lab_id.trim(), lab_name: newLab.lab_name.trim() })
+      toast.success(`Created ${newLab.lab_name.trim()}`)
+      setCreating(false)
+      setNewLab(EMPTY_LAB)
+      refreshLabs()
     } catch (err) {
-      alert(err.response?.data?.detail || 'Failed to create lab')
+      toast.error(apiError(err, 'Could not create the lab'))
+    } finally {
+      setSaving(false)
     }
   }
 
-  const handleDeleteLab = async (labId) => {
-    try {
-      await adminApi.deleteLab(labId)
-      fetchLabs()
-    } catch (err) {
-      alert(err.response?.data?.detail || 'Failed to delete lab')
-    }
-  }
-
-  // Calculate high level campus statistics
-  const totalLabs = mergedLabs.length
-  const totalCapacity = mergedLabs.reduce((acc, l) => acc + (l.capacity || 0), 0)
-  const totalAvailablePcs = mergedLabs.reduce((acc, l) => acc + (l.available_pcs || 0), 0)
-  const openLabsCount = mergedLabs.filter((l) => (l.state || '').toUpperCase() === 'OPEN').length
+  const today = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })
 
   return (
-    <div className="page-container">
-      {/* Page Header */}
-      <div className="page-header">
-        <div className="page-title-group">
-          <h1 className="page-title">
-            <FiGrid style={{ color: 'var(--color-primary)' }} />
-            Campus Lab Overview
-          </h1>
-          <p className="page-subtitle">
-            Live occupancy, real-time workstation status, and software locator
-          </p>
-        </div>
-
-        <div className="page-actions">
-          {isAdmin() && (
+    <>
+      <PageHeader
+        title="Overview"
+        description={`${today} · ${labs.length} ${labs.length === 1 ? 'lab' : 'labs'} monitored`}
+        actions={
+          <>
+            <form onSubmit={handleSearch} className="input-icon" style={{ width: 240 }} role="search">
+              <input
+                type="search"
+                className="input"
+                placeholder="Find software…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                aria-label="Find software"
+              />
+              <FiSearch size={15} />
+            </form>
             <button
-              onClick={() => setShowCreateModal(true)}
-              className="btn btn-primary btn-sm"
-              style={{ marginRight: '0.5rem' }}
+              type="button"
+              className="btn btn--secondary btn--icon"
+              onClick={handleRefresh}
+              disabled={refreshing}
+              aria-label="Refresh"
+              title="Refresh"
             >
-              <FiPlus size={14} />
-              <span>Add Lab</span>
+              <FiRefreshCw size={15} className={refreshing ? 'spin' : ''} />
             </button>
-          )}
-          <button
-            onClick={() => fetchLabs(true)}
-            className="btn btn-secondary btn-sm"
-            disabled={refreshing}
-          >
-            <FiRefreshCw size={14} className={refreshing ? 'spin' : ''} />
-            <span>{refreshing ? 'Refreshing...' : 'Refresh'}</span>
-          </button>
-        </div>
-      </div>
+            {isAdmin() && (
+              <button type="button" className="btn btn--primary" onClick={() => setCreating(true)}>
+                <FiPlus size={15} /> New lab
+              </button>
+            )}
+          </>
+        }
+      />
 
-      {showCreateModal && (
-        <div className="glass-panel" style={{ padding: '1.25rem', marginBottom: '1.25rem' }}>
-          <h3>Add New Lab</h3>
-          <form onSubmit={handleCreateLab} style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap', marginTop: '1rem' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.25rem' }}>Lab ID</label>
-              <input required value={newLabData.lab_id} onChange={e => setNewLabData({...newLabData, lab_id: e.target.value})} className="form-control" placeholder="e.g. 408" />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.25rem' }}>Lab Name</label>
-              <input required value={newLabData.lab_name} onChange={e => setNewLabData({...newLabData, lab_name: e.target.value})} className="form-control" placeholder="e.g. Computer Lab 408" />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.25rem' }}>Start Time</label>
-              <input required type="time" value={newLabData.operating_start_time} onChange={e => setNewLabData({...newLabData, operating_start_time: e.target.value})} className="form-control" />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.25rem' }}>End Time</label>
-              <input required type="time" value={newLabData.operating_end_time} onChange={e => setNewLabData({...newLabData, operating_end_time: e.target.value})} className="form-control" />
-            </div>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <button type="submit" className="btn btn-primary">Create</button>
-              <button type="button" className="btn btn-secondary" onClick={() => setShowCreateModal(false)}>Cancel</button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* Summary KPI Cards */}
-      <div className="grid-container grid-4">
-        <div className="glass-card" style={{ padding: '1.25rem' }}>
-          <div className="flex-between">
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Total Labs</span>
-            <div style={{ color: 'var(--color-primary)' }}>
-              <FiLayers size={18} />
-            </div>
-          </div>
-          <div style={{ fontSize: '1.75rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '0.5rem' }}>
-            {totalLabs}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-            {openLabsCount} open for walk-in use
-          </div>
-        </div>
-
-        <div className="glass-card" style={{ padding: '1.25rem' }}>
-          <div className="flex-between">
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Available PCs</span>
-            <div style={{ color: 'var(--color-success)' }}>
-              <FiCheckCircle size={18} />
-            </div>
-          </div>
-          <div style={{ fontSize: '1.75rem', fontWeight: 700, color: 'var(--color-success)', marginTop: '0.5rem' }}>
-            {totalAvailablePcs}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-            Out of {totalCapacity} total workstations
-          </div>
-        </div>
-
-        <div className="glass-card" style={{ padding: '1.25rem' }}>
-          <div className="flex-between">
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Campus Capacity</span>
-            <div style={{ color: 'var(--color-cyan)' }}>
-              <FiMonitor size={18} />
-            </div>
-          </div>
-          <div style={{ fontSize: '1.75rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '0.5rem' }}>
-            {totalCapacity}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-            Monitored in real-time
-          </div>
-        </div>
-
-        <div className="glass-card" style={{ padding: '1.25rem' }}>
-          <div className="flex-between">
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Live Telemetry</span>
-            <div style={{ color: 'var(--color-purple)' }}>
-              <FiActivity size={18} />
-            </div>
-          </div>
-          <div style={{ fontSize: '1.75rem', fontWeight: 700, color: 'var(--color-purple)', marginTop: '0.5rem' }}>
-            100%
-          </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-            Async heartbeat sync active
-          </div>
-        </div>
-      </div>
-
-      {/* Global Quick Search Bar */}
-      <div className="glass-panel" style={{ padding: '1.25rem' }}>
-        <h3 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: '0.75rem', color: 'var(--text-secondary)' }}>
-          Looking for specific software? Search campus-wide:
-        </h3>
-        <SearchBar
-          onSearch={handleSearch}
-          placeholder="Search software (e.g. VS Code, Wireshark, Blender, Python 3.11)..."
-          loading={searchLoading}
+      <div className="grid grid--stats">
+        <Stat
+          tone="available"
+          label="Free now"
+          value={loading ? '–' : totals.free}
+          total={loading ? undefined : totals.total}
+          foot={totals.AVAILABLE_SLEEP ? `Includes ${totals.AVAILABLE_SLEEP} asleep` : 'Across all labs'}
         />
+        <Stat tone="in-use" label="In use" value={loading ? '–' : totals.IN_USE} foot={`${occupancy}% occupancy`} />
+        <Stat
+          tone="neutral"
+          label="Labs open for walk-in"
+          value={labsLoading ? '–' : openLabs}
+          total={labsLoading ? undefined : labs.length}
+          foot={inSession ? `${inSession} with a class in session` : 'No classes in session'}
+        />
+        <Stat
+          tone="maintenance"
+          label="Under maintenance"
+          value={loading ? '–' : totals.MAINTENANCE}
+          foot={totals.MAINTENANCE ? 'Out of service' : 'All workstations in service'}
+        />
+      </div>
 
-        {searchQuery.length >= 2 && (
-          <div style={{ marginTop: '1.25rem' }}>
-            <SoftwareResults
-              results={searchResults}
-              searchQuery={searchQuery}
-              loading={searchLoading}
+      <section className="section">
+        <div className="section__header">
+          <h2 className="section__title">Labs</h2>
+        </div>
+
+        {labsLoading && labs.length === 0 ? (
+          <div className="grid grid--labs">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="skeleton" style={{ height: 212 }} />
+            ))}
+          </div>
+        ) : labs.length === 0 ? (
+          <div className="card">
+            <EmptyState
+              icon={FiLayers}
+              title="No labs yet"
+              description={isAdmin() ? 'Create a lab, then register its workstations.' : 'An administrator has not set up any labs yet.'}
+              action={
+                isAdmin() && (
+                  <button type="button" className="btn btn--primary" onClick={() => setCreating(true)}>
+                    <FiPlus size={15} /> New lab
+                  </button>
+                )
+              }
             />
           </div>
-        )}
-      </div>
-
-      {/* Labs Grid */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-        <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>All Computer Labs</h2>
-
-        {loading ? (
-          <div className="grid-container grid-3">
-            {[1, 2, 3].map((n) => (
-              <div key={n} className="glass-card skeleton" style={{ height: '180px' }} />
-            ))}
-          </div>
-        ) : mergedLabs.length === 0 ? (
-          <div className="glass-panel" style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
-            <FiLayers size={36} style={{ opacity: 0.4, marginBottom: '0.5rem' }} />
-            <p>No labs configured yet in the campus database.</p>
-          </div>
         ) : (
-          <div className="grid-container grid-3">
-            {mergedLabs.map((lab) => (
-              <LabCard key={lab.lab_id} lab={lab} isAdmin={isAdmin()} onDelete={handleDeleteLab} />
+          <div className="grid grid--labs">
+            {labs.map((lab) => (
+              <LabCard key={lab.lab_id} lab={lab} counts={perLab[lab.lab_id]} loading={pcsLoading} />
             ))}
           </div>
         )}
-      </div>
-    </div>
+      </section>
+
+      <Modal
+        open={creating}
+        onClose={() => setCreating(false)}
+        onSubmit={handleCreate}
+        busy={saving}
+        title="New lab"
+        description="Workstations are added from the lab page afterwards."
+        footer={
+          <>
+            <button type="button" className="btn btn--secondary" onClick={() => setCreating(false)} disabled={saving}>
+              Cancel
+            </button>
+            <button type="submit" className="btn btn--primary" disabled={saving}>
+              {saving ? 'Creating…' : 'Create lab'}
+            </button>
+          </>
+        }
+      >
+        <div className="field">
+          <label className="field__label" htmlFor="lab_name">
+            Name
+          </label>
+          <input
+            id="lab_name"
+            className="input"
+            placeholder="Computer Lab 408"
+            value={newLab.lab_name}
+            onChange={(e) => setNewLab({ ...newLab, lab_name: e.target.value })}
+            required
+          />
+        </div>
+        <div className="field">
+          <label className="field__label" htmlFor="lab_id">
+            Lab ID
+          </label>
+          <input
+            id="lab_id"
+            className="input mono"
+            placeholder="408"
+            value={newLab.lab_id}
+            onChange={(e) => setNewLab({ ...newLab, lab_id: e.target.value })}
+            required
+          />
+          <span className="field__hint">Used in URLs and to generate workstation IDs (e.g. 40801). Cannot be changed later.</span>
+        </div>
+        <div className="field-row">
+          <div className="field">
+            <label className="field__label" htmlFor="lab_open">
+              Opens
+            </label>
+            <input
+              id="lab_open"
+              type="time"
+              className="input"
+              value={newLab.operating_start_time}
+              onChange={(e) => setNewLab({ ...newLab, operating_start_time: e.target.value })}
+              required
+            />
+          </div>
+          <div className="field">
+            <label className="field__label" htmlFor="lab_close">
+              Closes
+            </label>
+            <input
+              id="lab_close"
+              type="time"
+              className="input"
+              value={newLab.operating_end_time}
+              onChange={(e) => setNewLab({ ...newLab, operating_end_time: e.target.value })}
+              required
+            />
+          </div>
+        </div>
+      </Modal>
+    </>
   )
 }
 

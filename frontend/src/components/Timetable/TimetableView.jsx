@@ -1,261 +1,174 @@
-import React, { useState } from 'react'
-import { useAuth } from '../../hooks/useAuth'
+import React, { useMemo, useState } from 'react'
+import { FiCalendar, FiPlus, FiTrash2, FiXCircle } from 'react-icons/fi'
 import { timetableApi } from '../../api/endpoints'
+import { useAuth } from '../../hooks/useAuth'
+import { apiError, useNow } from '../../lib/hooks'
 import {
-  FiCalendar,
-  FiClock,
-  FiXCircle,
-  FiPlus,
-  FiTrash2,
-  FiAlertCircle,
-} from 'react-icons/fi'
+  WEEKDAYS,
+  addDays,
+  clockToMinutes,
+  formatClock,
+  formatDateShort,
+  isoWeekday,
+  startOfWeek,
+  toLocalISODate,
+  weekdayName,
+} from '../../lib/time'
+import Modal from '../ui/Modal'
+import EmptyState from '../ui/EmptyState'
+import { useConfirm, useToast } from '../ui/Feedback'
+import CancelSlotModal from './CancelSlotModal'
 
-const DAYS = [
-  { id: 0, name: 'Monday', short: 'Mon' },
-  { id: 1, name: 'Tuesday', short: 'Tue' },
-  { id: 2, name: 'Wednesday', short: 'Wed' },
-  { id: 3, name: 'Thursday', short: 'Thu' },
-  { id: 4, name: 'Friday', short: 'Fri' },
-  { id: 5, name: 'Saturday', short: 'Sat' },
-]
+const EMPTY_SLOT = { day_of_week: 1, start_time: '09:00', end_time: '11:00', course_code: '' }
 
-const TimetableView = ({
-  labId,
-  timetable = [],
-  cancellations = [],
-  onSlotCancelRequested,
-  onTimetableChanged,
-}) => {
+const TimetableView = ({ labId, timetable = [], cancellations = [], onChanged }) => {
   const { isAdmin, isProfessor } = useAuth()
-  const [showAddModal, setShowAddModal] = useState(false)
-  const [addDay, setAddDay] = useState(0)
-  const [addStartTime, setAddStartTime] = useState('09:00')
-  const [addEndTime, setAddEndTime] = useState('11:00')
+  const toast = useToast()
+  const confirm = useConfirm()
+  const now = useNow(30_000)
+
   const [adding, setAdding] = useState(false)
+  const [draft, setDraft] = useState(EMPTY_SLOT)
+  const [saving, setSaving] = useState(false)
+  const [cancelling, setCancelling] = useState(null)
 
-  const formatTime = (timeStr) => {
-    if (!timeStr) return ''
-    if (typeof timeStr === 'string' && timeStr.includes(':')) {
-      const parts = timeStr.split(':')
-      return `${parts[0]}:${parts[1]}`
-    }
-    return timeStr
-  }
+  const today = new Date(now)
+  const todayISO = toLocalISODate(today)
+  const weekStart = startOfWeek(today)
+  const nowMinutes = today.getHours() * 60 + today.getMinutes()
 
-  const handleDeleteSlot = async (slotId) => {
-    if (!window.confirm('Are you sure you want to permanently delete this timetable slot?')) return
-    try {
-      await timetableApi.deleteTimetableEntry(slotId)
-      if (onTimetableChanged) onTimetableChanged()
-    } catch (err) {
-      console.error('Failed to delete timetable slot:', err)
-      alert(err.response?.data?.detail || 'Failed to delete slot')
-    }
-  }
+  const slotsById = useMemo(() => Object.fromEntries(timetable.map((s) => [s.timetable_id, s])), [timetable])
 
-  const handleAddSlot = async (e) => {
+  const upcoming = useMemo(
+    () =>
+      cancellations
+        .filter((c) => c.cancelled_for_date >= todayISO && slotsById[c.timetable_id])
+        .sort((a, b) => a.cancelled_for_date.localeCompare(b.cancelled_for_date)),
+    [cancellations, slotsById, todayISO]
+  )
+
+  const draftInvalid = clockToMinutes(draft.end_time) <= clockToMinutes(draft.start_time)
+
+  const handleAdd = async (e) => {
     e.preventDefault()
-    setAdding(true)
+    if (draftInvalid) return
+    setSaving(true)
     try {
       await timetableApi.createTimetableEntry(labId, {
-        day_of_week: parseInt(addDay, 10),
-        start_time: `${addStartTime}:00`,
-        end_time: `${addEndTime}:00`,
+        lab_id: labId,
+        day_of_week: Number(draft.day_of_week),
+        start_time: `${draft.start_time}:00`,
+        end_time: `${draft.end_time}:00`,
+        course_code: draft.course_code.trim() || null,
       })
-      setShowAddModal(false)
-      if (onTimetableChanged) onTimetableChanged()
-    } catch (err) {
-      console.error('Failed to create timetable slot:', err)
-      alert(err.response?.data?.detail || 'Failed to create slot')
-    } finally {
+      toast.success('Class added to the timetable')
       setAdding(false)
+      setDraft(EMPTY_SLOT)
+      onChanged?.()
+    } catch (err) {
+      toast.error(apiError(err, 'Could not add the class'))
+    } finally {
+      setSaving(false)
     }
   }
 
-  // Check if slot has active cancellations
-  const isSlotCancelled = (slotId) => {
-    return cancellations.some((c) => c.timetable_id === slotId)
+  const handleDelete = async (slot) => {
+    const ok = await confirm({
+      title: 'Delete this class?',
+      message: `${slot.course_code || 'Class'} on ${weekdayName(slot.day_of_week)}s, ${formatClock(slot.start_time)}–${formatClock(
+        slot.end_time
+      )}. This removes it from every week, along with its cancellations.`,
+      confirmLabel: 'Delete class',
+      tone: 'danger',
+    })
+    if (!ok) return
+    try {
+      await timetableApi.deleteTimetableEntry(slot.timetable_id)
+      toast.success('Class deleted')
+      onChanged?.()
+    } catch (err) {
+      toast.error(apiError(err, 'Could not delete the class'))
+    }
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-      <div className="flex-between">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-          <FiCalendar size={18} style={{ color: 'var(--color-primary)' }} />
-          <h3 style={{ fontSize: '1.15rem', fontWeight: 600 }}>Weekly Schedule</h3>
+    <>
+      <div className="toolbar">
+        <div className="muted">
+          Week of {weekStart.toLocaleDateString(undefined, { day: 'numeric', month: 'long' })}. The lab reads{' '}
+          <b style={{ color: 'var(--text)', fontWeight: 500 }}>Occupied</b> during a scheduled class.
         </div>
-
         {isAdmin() && (
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="btn btn-primary btn-sm"
-          >
-            <FiPlus size={15} />
-            <span>Add Slot</span>
+          <button type="button" className="btn btn--primary btn--sm" onClick={() => setAdding(true)}>
+            <FiPlus size={14} /> Add class
           </button>
         )}
       </div>
 
-      {/* Grid of Days */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: '1rem',
-        }}
-      >
-        {DAYS.map((day) => {
-          const daySlots = timetable
-            .filter((t) => t.day_of_week === day.id)
-            .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''))
+      {timetable.length === 0 ? (
+        <div className="card">
+          <EmptyState
+            icon={FiCalendar}
+            title="No classes scheduled"
+            description="With no timetable, this lab reads Open for its whole operating window."
+          />
+        </div>
+      ) : (
+        <div className="week">
+          {WEEKDAYS.map((day) => {
+            const date = addDays(weekStart, day.value - 1)
+            const dateISO = toLocalISODate(date)
+            const isToday = day.value === isoWeekday(today)
+            const slots = timetable
+              .filter((s) => Number(s.day_of_week) === day.value)
+              .sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)))
 
-          return (
-            <div
-              key={day.id}
-              className="glass-card"
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                borderRadius: 'var(--radius-md)',
-                overflow: 'hidden',
-              }}
-            >
-              <div
-                style={{
-                  background: 'hsla(220, 20%, 10%, 0.9)',
-                  padding: '0.65rem 0.85rem',
-                  borderBottom: '1px solid var(--border-glass)',
-                  fontWeight: 600,
-                  fontSize: '0.875rem',
-                  color: 'var(--text-primary)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                }}
-              >
-                <span>{day.name}</span>
-                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                  {daySlots.length} {daySlots.length === 1 ? 'slot' : 'slots'}
-                </span>
-              </div>
-
-              <div
-                style={{
-                  padding: '0.75rem',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.6rem',
-                  minHeight: '140px',
-                }}
-              >
-                {daySlots.length === 0 ? (
-                  <div
-                    style={{
-                      flex: 1,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '0.75rem',
-                      color: 'var(--text-muted)',
-                    }}
-                  >
-                    No scheduled sessions
-                  </div>
-                ) : (
-                  daySlots.map((slot) => {
-                    const cancelled = isSlotCancelled(slot.id)
+            return (
+              <section key={day.value} className={`day ${isToday ? 'day--today' : ''}`} aria-label={day.name}>
+                <header className="day__head">
+                  <span className="day__name">{day.short}</span>
+                  <span className="day__date">{isToday ? 'Today' : date.getDate()}</span>
+                </header>
+                <div className="day__slots">
+                  {slots.length === 0 && <div className="day__empty">—</div>}
+                  {slots.map((slot) => {
+                    const cancelled = cancellations.some(
+                      (c) => c.timetable_id === slot.timetable_id && c.cancelled_for_date === dateISO
+                    )
+                    const live =
+                      isToday &&
+                      !cancelled &&
+                      nowMinutes >= clockToMinutes(slot.start_time) &&
+                      nowMinutes <= clockToMinutes(slot.end_time)
                     return (
-                      <div
-                        key={slot.id}
-                        style={{
-                          background: cancelled
-                            ? 'hsla(0, 84%, 60%, 0.1)'
-                            : 'hsla(217, 91%, 60%, 0.12)',
-                          border: `1px solid ${
-                            cancelled
-                              ? 'hsla(0, 84%, 60%, 0.3)'
-                              : 'hsla(217, 91%, 60%, 0.25)'
-                          }`,
-                          borderRadius: 'var(--radius-sm)',
-                          padding: '0.6rem',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '0.35rem',
-                          position: 'relative',
-                        }}
-                      >
-                        <div className="flex-between">
-                          <span
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '0.3rem',
-                              fontSize: '0.78rem',
-                              fontFamily: 'JetBrains Mono, monospace',
-                              fontWeight: 600,
-                              color: cancelled
-                                ? 'var(--color-danger)'
-                                : 'var(--color-primary)',
-                              textDecoration: cancelled ? 'line-through' : 'none',
-                            }}
-                          >
-                            <FiClock size={12} />
-                            {formatTime(slot.start_time)} – {formatTime(slot.end_time)}
-                          </span>
-
-                          {cancelled && (
-                            <span
-                              className="badge badge-closed"
-                              style={{ fontSize: '0.6rem', padding: '0.1rem 0.35rem' }}
+                      <div key={slot.timetable_id} className={`slot ${cancelled ? 'slot--cancelled' : ''} ${live ? 'slot--live' : ''}`}>
+                        <div className="slot__time">
+                          {formatClock(slot.start_time)}–{formatClock(slot.end_time)}
+                        </div>
+                        <div className="slot__course">{slot.course_code || 'Class'}</div>
+                        {cancelled && <div className="slot__tag subtle">Cancelled this week</div>}
+                        {live && (
+                          <div className="slot__tag" style={{ color: 'var(--inuse-fg)' }}>
+                            In session
+                          </div>
+                        )}
+                        {(isProfessor() || isAdmin()) && (
+                          <div className="slot__actions">
+                            <button
+                              type="button"
+                              className="btn btn--ghost"
+                              onClick={() => setCancelling(slot)}
+                              title="Cancel this class on one date"
                             >
-                              Cancelled
-                            </span>
-                          )}
-                        </div>
-
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                          Lab Session
-                        </div>
-
-                        {/* Action buttons for Professor / Admin */}
-                        {(isAdmin() || isProfessor()) && (
-                          <div
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'flex-end',
-                              gap: '0.35rem',
-                              marginTop: '0.2rem',
-                              paddingTop: '0.3rem',
-                              borderTop: '1px solid var(--border-glass)',
-                            }}
-                          >
-                            {!cancelled && (
-                              <button
-                                onClick={() => onSlotCancelRequested(slot)}
-                                className="btn btn-ghost btn-sm"
-                                style={{
-                                  padding: '0.15rem 0.4rem',
-                                  fontSize: '0.68rem',
-                                  color: 'var(--color-warning)',
-                                }}
-                                title="Cancel session for a specific date"
-                              >
-                                <FiXCircle size={12} />
-                                <span>Cancel Slot</span>
-                              </button>
-                            )}
-
+                              <FiXCircle size={12} /> Cancel
+                            </button>
                             {isAdmin() && (
                               <button
-                                onClick={() => handleDeleteSlot(slot.id)}
-                                className="btn btn-ghost btn-sm"
-                                style={{
-                                  padding: '0.15rem 0.4rem',
-                                  fontSize: '0.68rem',
-                                  color: 'var(--color-danger)',
-                                }}
-                                title="Permanently delete slot"
+                                type="button"
+                                className="btn btn--danger-ghost"
+                                onClick={() => handleDelete(slot)}
+                                aria-label="Delete class"
+                                title="Delete class"
                               >
                                 <FiTrash2 size={12} />
                               </button>
@@ -264,88 +177,118 @@ const TimetableView = ({
                         )}
                       </div>
                     )
-                  })
-                )}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-
-      {/* Add Slot Modal */}
-      {showAddModal && (
-        <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h4 className="modal-title">Add Timetable Slot</h4>
-              <button
-                className="btn btn-ghost btn-icon"
-                onClick={() => setShowAddModal(false)}
-              >
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleAddSlot} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div className="input-group">
-                <label className="input-label">Day of Week</label>
-                <select
-                  className="select"
-                  value={addDay}
-                  onChange={(e) => setAddDay(e.target.value)}
-                >
-                  {DAYS.map((d) => (
-                    <option key={d.id} value={d.id} style={{ background: '#131722' }}>
-                      {d.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <div className="input-group">
-                  <label className="input-label">Start Time</label>
-                  <input
-                    type="time"
-                    className="input"
-                    value={addStartTime}
-                    onChange={(e) => setAddStartTime(e.target.value)}
-                    required
-                  />
+                  })}
                 </div>
-                <div className="input-group">
-                  <label className="input-label">End Time</label>
-                  <input
-                    type="time"
-                    className="input"
-                    value={addEndTime}
-                    onChange={(e) => setAddEndTime(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setShowAddModal(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  disabled={adding}
-                >
-                  {adding ? 'Adding...' : 'Create Slot'}
-                </button>
-              </div>
-            </form>
-          </div>
+              </section>
+            )
+          })}
         </div>
       )}
-    </div>
+
+      {upcoming.length > 0 && (
+        <section className="section">
+          <div className="section__header">
+            <h3 className="section__title">Upcoming cancellations</h3>
+          </div>
+          <div className="card list">
+            {upcoming.map((c) => {
+              const slot = slotsById[c.timetable_id]
+              return (
+                <div key={c.cancellation_id} className="list__row">
+                  <div>
+                    <div style={{ fontWeight: 500 }}>{slot.course_code || 'Class'}</div>
+                    <div className="subtle num" style={{ fontSize: 12.5 }}>
+                      {formatClock(slot.start_time)}–{formatClock(slot.end_time)}
+                    </div>
+                  </div>
+                  <span className="pill tone-neutral num">{c.cancelled_for_date === todayISO ? 'Today' : formatDateShort(c.cancelled_for_date)}</span>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
+      <Modal
+        open={adding}
+        onClose={() => setAdding(false)}
+        onSubmit={handleAdd}
+        busy={saving}
+        title="Add class"
+        description="A weekly recurring class. The lab reads Occupied during it."
+        footer={
+          <>
+            <button type="button" className="btn btn--secondary" onClick={() => setAdding(false)} disabled={saving}>
+              Cancel
+            </button>
+            <button type="submit" className="btn btn--primary" disabled={saving || draftInvalid}>
+              {saving ? 'Adding…' : 'Add class'}
+            </button>
+          </>
+        }
+      >
+        <div className="field">
+          <label className="field__label" htmlFor="slot_course">
+            Course code
+          </label>
+          <input
+            id="slot_course"
+            className="input"
+            placeholder="CS208"
+            value={draft.course_code}
+            onChange={(e) => setDraft({ ...draft, course_code: e.target.value })}
+          />
+        </div>
+        <div className="field">
+          <label className="field__label" htmlFor="slot_day">
+            Day
+          </label>
+          <select
+            id="slot_day"
+            className="select"
+            value={draft.day_of_week}
+            onChange={(e) => setDraft({ ...draft, day_of_week: Number(e.target.value) })}
+          >
+            {WEEKDAYS.map((d) => (
+              <option key={d.value} value={d.value}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field-row">
+          <div className="field">
+            <label className="field__label" htmlFor="slot_start">
+              Starts
+            </label>
+            <input
+              id="slot_start"
+              type="time"
+              className="input"
+              value={draft.start_time}
+              onChange={(e) => setDraft({ ...draft, start_time: e.target.value })}
+              required
+            />
+          </div>
+          <div className="field">
+            <label className="field__label" htmlFor="slot_end">
+              Ends
+            </label>
+            <input
+              id="slot_end"
+              type="time"
+              className="input"
+              value={draft.end_time}
+              onChange={(e) => setDraft({ ...draft, end_time: e.target.value })}
+              required
+            />
+          </div>
+        </div>
+        {draftInvalid && <div className="field__error">The class must end after it starts.</div>}
+      </Modal>
+
+      <CancelSlotModal slot={cancelling} onClose={() => setCancelling(null)} onCancelled={onChanged} />
+    </>
   )
 }
 

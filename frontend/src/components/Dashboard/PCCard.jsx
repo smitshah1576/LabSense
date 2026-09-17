@@ -1,191 +1,111 @@
-import React, { useState } from 'react'
-import { useAuth } from '../../hooks/useAuth'
-import { pcsApi } from '../../api/endpoints'
-import StatusIndicator from './StatusIndicator'
-import {
-  FiCpu,
-  FiClock,
-  FiLock,
-  FiUnlock,
-  FiUserCheck,
-  FiTool,
-  FiActivity,
-  FiTrash2,
-} from 'react-icons/fi'
+import React from 'react'
+import { Link } from 'react-router-dom'
+import { FiFlag, FiLoader, FiLock, FiMonitor, FiTool, FiTrash2, FiUnlock, FiUser, FiUserX } from 'react-icons/fi'
+import StatusPill from '../ui/StatusPill'
+import { pcStateMeta } from '../../lib/pcState'
+import { formatDuration, relativeTime } from '../../lib/time'
 
-const STATE_LABELS = {
-  AVAILABLE: 'Available',
-  IN_USE: 'In Use',
-  AVAILABLE_SLEEP: 'Sleep',
-  MAINTENANCE: 'Maintenance',
-}
+const cpuTone = (cpu) => (cpu >= 85 ? 'meter__fill--max' : cpu >= 30 ? 'meter__fill--hot' : '')
 
-const PCCard = ({ pc, liveState, onStatusChanged, onDeletePC }) => {
-  const { isProfessor, isAdmin } = useAuth()
-  const [loadingToggle, setLoadingToggle] = useState(false)
-
-  // Merge DB data with live WebSocket state
-  const currentStatus = (liveState?.status || pc.current_state || 'AVAILABLE').toUpperCase()
-  const isMaintenance = currentStatus === 'MAINTENANCE'
-  const sessionActive = liveState?.session_active ?? pc.session_active ?? false
-  const screenLocked = liveState?.screen_locked ?? pc.screen_locked ?? false
-  const cpuPercent = liveState?.cpu_percent ?? pc.cpu_percent ?? 0
-  const idleSeconds = liveState?.idle_seconds ?? pc.idle_seconds ?? 0
-  const lastHeartbeat = liveState?.last_heartbeat_at ?? pc.last_heartbeat_at
-
-  const getStateCardClass = () => {
-    switch (currentStatus) {
-      case 'AVAILABLE':
-        return 'state-available'
-      case 'IN_USE':
-        return 'state-in-use'
-      case 'AVAILABLE_SLEEP':
-        return 'state-sleep'
-      case 'MAINTENANCE':
-        return 'state-maintenance'
-      default:
-        return ''
-    }
-  }
-
-  const handleToggleMaintenance = async (e) => {
-    e.stopPropagation()
-    setLoadingToggle(true)
-    try {
-      await pcsApi.toggleMaintenance(pc.pc_id, !isMaintenance)
-      if (onStatusChanged) {
-        onStatusChanged(pc.pc_id, !isMaintenance ? 'MAINTENANCE' : 'AVAILABLE')
-      }
-    } catch (err) {
-      console.error('Failed to toggle maintenance mode:', err)
-      alert(err.response?.data?.detail || 'Failed to update maintenance state')
-    } finally {
-      setLoadingToggle(false)
-    }
-  }
-
-  const formatIdleTime = (seconds) => {
-    if (!seconds || seconds <= 0) return '0s'
-    if (seconds < 60) return `${seconds}s`
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return `${mins}m ${secs}s`
-  }
-
-  const formatHeartbeat = (ts) => {
-    if (!ts) return 'Never'
-    try {
-      const d = new Date(ts)
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    } catch {
-      return ts
-    }
-  }
+const PCCard = ({ pc, now, canMaintain, canDelete, busy, onToggleMaintenance, onDelete }) => {
+  const state = pc.current_state
+  const meta = pcStateMeta(state)
+  const isMaintenance = state === 'MAINTENANCE'
+  const asleep = state === 'AVAILABLE_SLEEP'
+  const cpu = Math.max(0, Math.min(100, Number(pc.cpu_percent) || 0))
+  const updated = relativeTime(pc.last_heartbeat_at, now)
 
   return (
-    <div className={`pc-card ${getStateCardClass()}`}>
-      <div className="pc-header">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-          <span className="pc-hostname">{pc.pc_id}</span>
-          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-            {STATE_LABELS[currentStatus] || currentStatus}
-          </span>
+    <article className={`card pc tone-${meta.tone}`} aria-label={`${pc.pc_id}, ${meta.label}`}>
+      <div className="pc__head">
+        <div className="pc__name">
+          <FiMonitor size={14} />
+          <span className="mono">{pc.pc_id}</span>
         </div>
-        <StatusIndicator state={currentStatus} />
+        <StatusPill state={state} />
       </div>
 
-      {/* Telemetry Display */}
-      <div className="pc-telemetry-grid">
-        <div className="pc-telemetry-item">
-          <span className="pc-telemetry-label">CPU Load</span>
-          <span className="pc-telemetry-val" style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-            <FiCpu size={12} style={{ color: 'var(--color-primary)' }} />
-            {typeof cpuPercent === 'number' ? `${cpuPercent.toFixed(1)}%` : '0.0%'}
-          </span>
-        </div>
-
-        <div className="pc-telemetry-item">
-          <span className="pc-telemetry-label">Idle Time</span>
-          <span className="pc-telemetry-val" style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-            <FiClock size={12} style={{ color: 'var(--color-warning)' }} />
-            {formatIdleTime(idleSeconds)}
-          </span>
-        </div>
-
-        <div className="pc-telemetry-item">
-          <span className="pc-telemetry-label">Session</span>
-          <span className="pc-telemetry-val" style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.74rem' }}>
-            <FiUserCheck size={12} style={{ color: sessionActive ? 'var(--color-success)' : 'var(--text-muted)' }} />
-            {sessionActive ? 'Active' : 'No User'}
-          </span>
-        </div>
-
-        <div className="pc-telemetry-item">
-          <span className="pc-telemetry-label">Screen</span>
-          <span className="pc-telemetry-val" style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.74rem' }}>
-            {screenLocked ? (
-              <>
-                <FiLock size={12} style={{ color: 'var(--color-warning)' }} />
-                <span>Locked</span>
-              </>
-            ) : (
-              <>
-                <FiUnlock size={12} style={{ color: 'var(--color-success)' }} />
-                <span>Unlocked</span>
-              </>
-            )}
-          </span>
-        </div>
+      <div className="pc__body">
+        {pc.has_telemetry ? (
+          <>
+            {asleep && <div className="pc__stale">Last reported before sleeping</div>}
+            <dl className={`kv ${asleep ? 'kv--dim' : ''}`}>
+              <div>
+                <dt className="kv__label">CPU</dt>
+                <dd className="kv__value">{cpu.toFixed(1)}%</dd>
+                <div className="meter" aria-hidden="true">
+                  <div className={`meter__fill ${cpuTone(cpu)}`} style={{ width: `${cpu}%` }} />
+                </div>
+              </div>
+              <div>
+                <dt className="kv__label">Idle</dt>
+                <dd className="kv__value">{formatDuration(pc.idle_seconds)}</dd>
+              </div>
+              <div>
+                <dt className="kv__label">Session</dt>
+                <dd className="kv__value">
+                  {pc.session_active ? <FiUser size={13} /> : <FiUserX size={13} />}
+                  {pc.session_active ? 'Signed in' : 'No one'}
+                </dd>
+              </div>
+              <div>
+                <dt className="kv__label">Screen</dt>
+                <dd className="kv__value">
+                  {pc.screen_locked ? <FiLock size={13} /> : <FiUnlock size={13} />}
+                  {pc.screen_locked ? 'Locked' : 'Unlocked'}
+                </dd>
+              </div>
+            </dl>
+          </>
+        ) : (
+          <div className="pc__waiting">
+            <FiLoader size={14} />
+            Waiting for the first heartbeat
+          </div>
+        )}
       </div>
 
-      <div className="pc-footer">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-          <FiActivity size={11} />
-          <span>Heartbeat: {formatHeartbeat(lastHeartbeat)}</span>
-        </div>
-
-        <div style={{ display: 'flex', gap: '0.3rem' }}>
-          {(isAdmin() || isProfessor()) && (
+      <footer className="pc__foot">
+        <span className="num" title={pc.last_heartbeat_at ? new Date(pc.last_heartbeat_at).toLocaleString() : undefined}>
+          {updated ? `Updated ${updated}` : 'No reports yet'}
+        </span>
+        <div className="pc__actions">
+          <Link
+            to={`/damage-reports?lab=${encodeURIComponent(pc.lab_id || '')}&pc=${encodeURIComponent(pc.pc_id)}`}
+            className="btn btn--ghost btn--icon btn--sm"
+            title="Report an issue"
+            aria-label={`Report an issue with ${pc.pc_id}`}
+          >
+            <FiFlag size={13} />
+          </Link>
+          {canMaintain && (
             <button
-              onClick={handleToggleMaintenance}
-              disabled={loadingToggle}
-              className={`btn btn-sm ${isMaintenance ? 'btn-success' : 'btn-ghost'}`}
-              style={{
-                padding: '0.2rem 0.55rem',
-                fontSize: '0.7rem',
-                borderRadius: 'var(--radius-sm)',
-                border: isMaintenance ? 'none' : '1px solid var(--border-subtle)',
-              }}
-              title={isMaintenance ? 'Clear maintenance mode' : 'Mark PC for maintenance'}
+              type="button"
+              className="btn btn--ghost btn--icon btn--sm"
+              onClick={() => onToggleMaintenance(pc)}
+              disabled={busy}
+              title={isMaintenance ? 'Return to service' : 'Mark for maintenance'}
+              aria-label={isMaintenance ? `Return ${pc.pc_id} to service` : `Mark ${pc.pc_id} for maintenance`}
+              aria-pressed={isMaintenance}
+              style={isMaintenance ? { color: 'var(--maint-fg)' } : undefined}
             >
-              <FiTool size={11} />
-              <span>{loadingToggle ? '...' : isMaintenance ? 'Resolve' : 'Maint.'}</span>
+              {busy ? <FiLoader size={13} className="spin" /> : <FiTool size={13} />}
             </button>
           )}
-          {isAdmin() && onDeletePC && (
+          {canDelete && (
             <button
-              onClick={(e) => {
-                e.stopPropagation()
-                if (window.confirm(`Delete PC ${pc.pc_id}? This cannot be undone.`)) {
-                  onDeletePC(pc.pc_id)
-                }
-              }}
-              className="btn btn-sm btn-ghost"
-              style={{
-                padding: '0.2rem 0.4rem',
-                fontSize: '0.7rem',
-                borderRadius: 'var(--radius-sm)',
-                border: '1px solid var(--color-danger)',
-                color: 'var(--color-danger)',
-              }}
-              title="Delete PC"
+              type="button"
+              className="btn btn--danger-ghost btn--icon btn--sm"
+              onClick={() => onDelete(pc)}
+              title="Remove workstation"
+              aria-label={`Remove ${pc.pc_id}`}
             >
-              <FiTrash2 size={11} />
+              <FiTrash2 size={13} />
             </button>
           )}
         </div>
-      </div>
-    </div>
+      </footer>
+    </article>
   )
 }
 

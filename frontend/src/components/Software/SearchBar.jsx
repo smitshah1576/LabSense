@@ -1,65 +1,29 @@
-import React, { useState, useEffect, useRef } from 'react'
-import { FiSearch, FiX, FiLoader } from 'react-icons/fi'
+import React from 'react'
+import { FiLoader, FiSearch, FiX } from 'react-icons/fi'
 
-const SearchBar = ({ onSearch, placeholder = 'Search software (e.g., Python, MATLAB, Docker, VS Code)...', loading = false, initialValue = '' }) => {
-  const [query, setQuery] = useState(initialValue)
-  const isFirstRender = useRef(true)
-
-  useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false
-      if (initialValue) {
-        onSearch(initialValue)
-      }
-      return
-    }
-
-    const handler = setTimeout(() => {
-      onSearch(query.trim())
-    }, 300)
-
-    return () => {
-      clearTimeout(handler)
-    }
-  }, [query])
-
-  const handleClear = () => {
-    setQuery('')
-    onSearch('')
-  }
-
+// Controlled search input. Debouncing is the caller's job (useDebouncedValue).
+const SearchBar = ({ value, onChange, placeholder = 'Search software…', loading = false, size, autoFocus, label = 'Search software' }) => {
+  const large = size === 'lg'
   return (
-    <div className="search-input-wrapper">
-      <span className="search-input-icon">
-        {loading ? (
-          <FiLoader className="spin" size={18} style={{ animation: 'spin 1s linear infinite' }} />
-        ) : (
-          <FiSearch size={18} />
-        )}
-      </span>
+    <div className={`input-icon ${large ? 'input-icon--lg' : ''}`}>
       <input
-        type="text"
-        className="search-input"
+        type="search"
+        className={`input ${large ? 'input--lg' : ''}`}
         placeholder={placeholder}
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label={label}
+        autoFocus={autoFocus}
+        spellCheck={false}
+        autoComplete="off"
+        style={{ paddingRight: value ? 40 : undefined }}
       />
-      {query && (
-        <button
-          type="button"
-          className="search-clear-btn"
-          onClick={handleClear}
-          title="Clear search"
-        >
-          <FiX size={16} />
+      {loading ? <FiLoader size={large ? 17 : 15} className="spin" /> : <FiSearch size={large ? 17 : 15} />}
+      {value && (
+        <button type="button" className="input-clear" onClick={() => onChange('')} aria-label="Clear search">
+          <FiX size={15} />
         </button>
       )}
-      <style>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
     </div>
   )
 }
