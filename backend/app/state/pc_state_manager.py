@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from collections import deque
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Optional, Callable, Awaitable
@@ -19,6 +20,45 @@ class PCLiveState:
     cpu_percent: float = 0.0
     last_heartbeat_at: Optional[datetime] = None
     staleness_task: Optional[asyncio.Task] = None
+    # Recent CPU samples; CPU only counts when *all* of them exceed the threshold.
+    cpu_samples: deque = field(default_factory=lambda: deque(maxlen=max(settings.CPU_WINDOW_HEARTBEATS, 1)))
+    # When the screen went from unlocked to locked; None while unlocked.
+    locked_since: Optional[datetime] = None
+
+    def record_telemetry(self, session_active: bool, screen_locked: bool,
+                         idle_seconds: int, cpu_percent: float, now: datetime) -> None:
+        if screen_locked and not self.screen_locked:
+            self.locked_since = now
+        elif not screen_locked:
+            self.locked_since = None
+        self.session_active = session_active
+        self.screen_locked = screen_locked
+        self.idle_seconds = idle_seconds
+        self.cpu_percent = cpu_percent
+        self.cpu_samples.append(cpu_percent)
+        self.last_heartbeat_at = now
+
+    def is_in_use(self, now: datetime) -> bool:
+        """IN_USE = session_active AND (recent input OR sustained CPU OR recently locked).
+
+        Sustained CPU means every one of the last CPU_WINDOW_HEARTBEATS samples
+        is above the threshold (~15s at the default window), so a single spike
+        from apt/snapd/indexing never marks an empty PC as in use, while a
+        long-running job keeps a PC busy even with nobody touching it.
+        """
+        if not self.session_active:
+            return False
+        recent_input = self.idle_seconds < settings.IDLE_THRESHOLD_SECONDS
+        busy_cpu = (
+            len(self.cpu_samples) == self.cpu_samples.maxlen
+            and min(self.cpu_samples) > settings.CPU_THRESHOLD_PERCENT
+        )
+        lock_reserve = (
+            self.screen_locked
+            and self.locked_since is not None
+            and (now - self.locked_since).total_seconds() < settings.LOCK_RESERVE_SECONDS
+        )
+        return recent_input or busy_cpu or lock_reserve
 
 class PCStateManager:
     def __init__(self):
@@ -49,33 +89,18 @@ class PCStateManager:
                 self._states[pc_id] = PCLiveState(pc_id=pc_id)
             
             state = self._states[pc_id]
-            
+            now = datetime.now(timezone.utc)
+            # Telemetry (and the CPU/lock history) is kept current even in
+            # maintenance, so the rule is accurate the moment maintenance ends.
+            state.record_telemetry(session_active, screen_locked, idle_seconds, cpu_percent, now)
+
             # If in MAINTENANCE, suppress all automatic transitions
             if state.current_state == PCState.MAINTENANCE:
-                state.last_heartbeat_at = datetime.now(timezone.utc)
-                state.session_active = session_active
-                state.screen_locked = screen_locked
-                state.idle_seconds = idle_seconds
-                state.cpu_percent = cpu_percent
                 self._reset_staleness_timer(pc_id)
                 return None
-            
-            # Update telemetry
-            state.session_active = session_active
-            state.screen_locked = screen_locked
-            state.idle_seconds = idle_seconds
-            state.cpu_percent = cpu_percent
-            state.last_heartbeat_at = datetime.now(timezone.utc)
-            
-            # Derive new state using the composite condition:
-            # IN_USE = session_active AND (idle < threshold OR cpu > threshold OR screen_locked)
+
             old_state = state.current_state
-            if session_active and (idle_seconds < settings.IDLE_THRESHOLD_SECONDS 
-                                    or cpu_percent > settings.CPU_THRESHOLD_PERCENT 
-                                    or screen_locked):
-                new_state = PCState.IN_USE
-            else:
-                new_state = PCState.AVAILABLE
+            new_state = PCState.IN_USE if state.is_in_use(now) else PCState.AVAILABLE
             
             state.current_state = new_state
             self._reset_staleness_timer(pc_id)

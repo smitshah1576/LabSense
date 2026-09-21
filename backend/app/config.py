@@ -17,8 +17,16 @@ class Settings(BaseSettings):
     # Override via LABSENSE_CORS_ORIGINS in .env (JSON list).
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     HEARTBEAT_TIMEOUT_SECONDS: int = 15
+    # --- IN_USE rule (see PCStateManager.handle_heartbeat) ---
+    # Input within this many seconds counts as someone at the PC.
     IDLE_THRESHOLD_SECONDS: int = 300
+    # CPU counts only if it stays above the threshold for CPU_WINDOW_HEARTBEATS
+    # consecutive heartbeats (~5s each), so a one-off spike doesn't count.
     CPU_THRESHOLD_PERCENT: float = 5.0
+    CPU_WINDOW_HEARTBEATS: int = 3
+    # A locked screen holds the PC as IN_USE for this long after locking; past
+    # that, an auto-locked, abandoned session no longer looks occupied.
+    LOCK_RESERVE_SECONDS: int = 900
     # Lab operating hours and timetable slots are stored as local wall-clock
     # times, so lab state must be computed against this zone — not UTC.
     TIMEZONE: str = "Asia/Kolkata"

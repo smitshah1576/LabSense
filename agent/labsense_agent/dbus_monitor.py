@@ -7,7 +7,9 @@ signals from ``systemd-logind``:
                           *after* resume  (arg ``False``)
 - ``PrepareForShutdown``— emitted *before* shutdown/reboot (``True``)
                           and if the shutdown is cancelled (``False``)
-- ``Lock`` / ``Unlock`` — emitted when a session's screen lock state changes
+- ``Lock`` / ``Unlock`` — emitted only by ``loginctl lock-session``; desktop
+                          lock screens set the ``LockedHint`` property
+                          instead, which ``get_session_hints()`` polls
 
 IMPORTANT DESIGN PRINCIPLE: this class is a **subscriber** to logind's
 broadcast signals — we do NOT implement our own session tracking.
@@ -175,6 +177,67 @@ class LogindMonitor:
         elif member == 'Unlock':
             logger.info('Received Unlock signal')
             asyncio.create_task(self._safe_callback(self._on_unlock))
+
+    async def _get_properties(self, path: str, interface: str) -> dict | None:
+        """``org.freedesktop.DBus.Properties.GetAll`` on a logind object."""
+        reply = await self._bus.call(
+            Message(
+                destination=self._LOGIND_BUS_NAME,
+                path=path,
+                interface='org.freedesktop.DBus.Properties',
+                member='GetAll',
+                signature='s',
+                body=[interface],
+            )
+        )
+        if reply.message_type == MessageType.ERROR:
+            logger.debug('GetAll %s on %s failed: %s', interface, path, reply.body)
+            return None
+        return {key: variant.value for key, variant in reply.body[0].items()}
+
+    async def get_session_hints(self) -> dict | None:
+        """Read lock/idle/active hints for the session in front of seat0.
+
+        The desktop (GNOME Shell, KDE, …) publishes these on the *system* bus
+        through logind, so a system-user daemon can read them without access
+        to the user's display or session bus:
+
+        - ``LockedHint``  — set by the lock screen (Super+L, auto-lock)
+        - ``IdleHint`` / ``IdleSinceHint`` — set after the desktop's own idle
+          delay (GNOME: Settings → Power → Screen Blank)
+
+        Returns ``None`` when the bus is unavailable (e.g. the supervisor is
+        reconnecting), and ``{'present': False}`` when nobody is logged in at
+        the seat.
+        """
+        if self._bus is None:
+            return None
+        try:
+            seat = await self._get_properties(
+                '/org/freedesktop/login1/seat/seat0', 'org.freedesktop.login1.Seat'
+            )
+            if seat is None:
+                return None
+            session_id, session_path = seat.get('ActiveSession', ('', '/'))
+            if not session_id or session_path == '/':
+                return {'present': False}
+
+            props = await self._get_properties(session_path, self._SESSION_IFACE)
+            if props is None:
+                return None
+            return {
+                'present': True,
+                'id': session_id,
+                'user': props.get('Name', ''),
+                'class': props.get('Class', ''),
+                'active': bool(props.get('Active', False)),
+                'locked': bool(props.get('LockedHint', False)),
+                'idle_hint': bool(props.get('IdleHint', False)),
+                'idle_since_us': int(props.get('IdleSinceHint', 0) or 0),
+            }
+        except Exception as exc:
+            logger.debug('Failed to read logind session hints: %s', exc)
+            return None
 
     @staticmethod
     async def _safe_callback(coro_fn: Callable, *args) -> None:

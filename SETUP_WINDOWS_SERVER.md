@@ -233,7 +233,7 @@ Seed logins (all `password123`): `admin@labsense.dev`, `prof@labsense.dev`, `stu
 > hostname, which almost certainly does not match.
 
 ```bash
-sudo apt install -y python3-venv xprintidle
+sudo apt install -y python3-venv
 ```
 
 ```bash
@@ -256,6 +256,13 @@ heartbeat line per minute. For every single heartbeat, redeploy with `--log-leve
 If the server rejects the `pc_id`, the agent now logs an explicit `Server rejected pc_id …` error
 rather than appearing healthy.
 
+It should also log `Input idle: watching N device(s): …` at startup. That line means the idle time
+is exact. Check the Session, Screen and Idle values on the lab PC itself (see TESTING.md, T5b):
+
+```bash
+sudo -u labsense /opt/labsense-agent/.venv/bin/python3 /opt/labsense-agent/probe_telemetry.py
+```
+
 ### Running the agent in the foreground instead
 
 For quick testing without installing a service:
@@ -268,10 +275,10 @@ cd agent && python3 -m venv .venv && source .venv/bin/activate && pip install -r
 LABSENSE_SERVER_HOST=10.234.237.199 LABSENSE_PC_ID=lab-a-pc-1 LABSENSE_LOG_LEVEL=DEBUG python3 -m labsense_agent.main
 ```
 
-Note this behaves *differently* from the systemd deployment: run this way it inherits your desktop
-session, so `xprintidle` can read real idle time. The packaged service runs as the unprivileged
-`labsense` system user with no `DISPLAY`, where idle detection is unreliable — see the caveat in
-`md_files/progress.md`.
+Session, screen lock and idle time are read from systemd-logind and `/dev/input`, so this gives
+the same values as the service. To read input devices from the foreground, your own user must be in
+the `input` group (`sudo usermod -aG input $USER`, then log out and back in). Otherwise idle time
+falls back to logind's coarser IdleHint.
 
 ### Useful commands
 

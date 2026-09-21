@@ -36,16 +36,11 @@ from . import config
 from .dbus_monitor import LogindMonitor
 from .heartbeat import HeartbeatClient
 from .inhibitor import InhibitorLock
+from .input_idle import InputIdleTracker
 from .software_scan import scan_all_software
 from .telemetry import get_cpu_percent, get_idle_seconds, get_screen_locked, get_session_active
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Shared mutable state — written by D-Bus callbacks, read by heartbeat loop
-# ---------------------------------------------------------------------------
-_screen_locked: bool = False
-
 
 # ---------------------------------------------------------------------------
 # D-Bus signal callbacks
@@ -95,24 +90,29 @@ async def _on_prepare_shutdown(
 
 
 async def _on_lock() -> None:
-    """Handle ``Lock`` signal from logind."""
-    global _screen_locked
-    _screen_locked = True
-    logger.info('Screen locked')
+    """Handle ``Lock`` signal from logind (``loginctl lock-session`` only).
+
+    Informational: lock state itself comes from the session's ``LockedHint``,
+    polled each heartbeat.  Latching a flag here would stick at True whenever
+    the user unlocks through the desktop, which emits no ``Unlock`` signal.
+    """
+    logger.info('Received logind Lock request')
 
 
 async def _on_unlock() -> None:
-    """Handle ``Unlock`` signal from logind."""
-    global _screen_locked
-    _screen_locked = False
-    logger.info('Screen unlocked')
+    """Handle ``Unlock`` signal from logind (informational, see ``_on_lock``)."""
+    logger.info('Received logind Unlock request')
 
 
 # ---------------------------------------------------------------------------
 # Long-running task coroutines
 # ---------------------------------------------------------------------------
 
-async def _heartbeat_loop(client: HeartbeatClient) -> None:
+async def _heartbeat_loop(
+    client: HeartbeatClient,
+    monitor: LogindMonitor,
+    idle_tracker: InputIdleTracker,
+) -> None:
     """Periodically gather telemetry and send HEARTBEAT messages.
 
     Runs indefinitely.  On connection loss, reconnects with exponential
@@ -129,9 +129,10 @@ async def _heartbeat_loop(client: HeartbeatClient) -> None:
 
             # Gather telemetry — all non-blocking.
             cpu = get_cpu_percent()
-            session_active = get_session_active()
-            screen_locked = await get_screen_locked() or _screen_locked
-            idle_seconds = await get_idle_seconds()
+            hints = await monitor.get_session_hints()
+            session_active, _ = get_session_active(hints)
+            screen_locked, _ = await get_screen_locked(hints)
+            idle_seconds, _ = await get_idle_seconds(hints, idle_tracker)
 
             ok = await client.send_heartbeat(
                 session_active=session_active,
@@ -256,6 +257,8 @@ async def _run() -> None:
     # --- Initialise components ---
     heartbeat_client = HeartbeatClient()
     inhibitor = InhibitorLock()
+    idle_tracker = InputIdleTracker()
+    await idle_tracker.start()
 
     logind_monitor = LogindMonitor(
         on_prepare_sleep=functools.partial(
@@ -292,7 +295,8 @@ async def _run() -> None:
 
     # --- Launch long-running tasks ---
     heartbeat_task = asyncio.create_task(
-        _heartbeat_loop(heartbeat_client), name='heartbeat'
+        _heartbeat_loop(heartbeat_client, logind_monitor, idle_tracker),
+        name='heartbeat',
     )
     dbus_task = asyncio.create_task(
         _dbus_supervisor(logind_monitor), name='dbus-monitor'
@@ -339,6 +343,7 @@ async def _run() -> None:
             )
 
     # Release resources.
+    await idle_tracker.stop()
     await logind_monitor.disconnect()
     await heartbeat_client.close()
     await inhibitor.close()

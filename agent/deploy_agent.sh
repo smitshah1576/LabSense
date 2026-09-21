@@ -102,6 +102,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo -e "${CYAN}[2/6] Copying agent codebase to $INSTALL_DIR...${NC}"
 cp -r "$SCRIPT_DIR/labsense_agent" "$INSTALL_DIR/"
 cp "$SCRIPT_DIR/requirements.txt" "$INSTALL_DIR/"
+cp "$SCRIPT_DIR/probe_telemetry.py" "$INSTALL_DIR/"
 
 # 3. Create Virtual Environment & Install dependencies inside it
 echo -e "${CYAN}[3/6] Setting up Python virtual environment at $VENV_DIR...${NC}"
@@ -121,6 +122,9 @@ echo -e "${CYAN}[4/6] Setting up 'labsense' system user...${NC}"
 if ! id "labsense" &>/dev/null; then
     useradd --system --no-create-home --shell /usr/sbin/nologin labsense
 fi
+# 'input' lets the agent timestamp keyboard/mouse events for idle time. The
+# event bytes are discarded unread — only *when* input happened is recorded.
+usermod -aG input labsense
 chown -R labsense:labsense "$INSTALL_DIR"
 
 # 5. Create systemd service file using venv python3
@@ -136,6 +140,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=labsense
+# Read access to /dev/input/event* for precise idle time (timing only).
+SupplementaryGroups=input
 Environment=LABSENSE_SERVER_HOST=$SERVER_HOST
 Environment=LABSENSE_SERVER_PORT=$SERVER_PORT
 Environment=LABSENSE_PC_ID=$PC_ID
@@ -170,4 +176,8 @@ echo -e "  • Check service status  : ${YELLOW}sudo systemctl status labsense-a
 echo -e "  • Watch live logs       : ${YELLOW}sudo journalctl -u labsense-agent -f${NC}"
 echo -e "  • Restart service       : ${YELLOW}sudo systemctl restart labsense-agent${NC}"
 echo -e "  • Stop service          : ${YELLOW}sudo systemctl stop labsense-agent${NC}"
+echo -e "  • Check telemetry probes: ${YELLOW}sudo -u labsense $VENV_DIR/bin/python3 $INSTALL_DIR/probe_telemetry.py${NC}"
+echo ""
+echo -e "Note: the 'labsense' user is in the 'input' group so it can measure idle"
+echo -e "time. It records only when input happened, never which keys were pressed."
 echo ""

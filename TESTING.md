@@ -89,9 +89,36 @@ sudo journalctl -u labsense-agent -f
 (cpu=…, idle=…s, active=…, locked=…)`, then about one heartbeat line per minute.
 `systemctl status labsense-agent` stays `active (running)`.
 
-**No heartbeat lines at all?** Redeploy with `--log-level DEBUG` to see every send. If `Connected`
-appears but no heartbeats follow, the telemetry probes are hanging — see the `xprintidle` caveat in
-Phase 4.
+**No heartbeat lines at all?** Redeploy with `--log-level DEBUG` to see every send.
+
+## T5b — Telemetry sources (Session / Screen / Idle)
+
+**Run on:** the Ubuntu lab PC, logged in at its own screen
+
+```bash
+sudo -u labsense /opt/labsense-agent/.venv/bin/python3 /opt/labsense-agent/probe_telemetry.py
+```
+
+This prints every value with the source it came from, every 2 s for 60 s. While it runs:
+
+| Do this | Expect |
+|---|---|
+| Move the mouse or type | `idle` drops to 0–2 s and is tagged `[input]` |
+| Keep your hands off for 20 s | `idle` counts up 2, 4, 6 … |
+| Press Super+L | `locked=True [logind]` within about 2 s |
+| Unlock | `locked=False` |
+| Log out to the login screen (from another terminal via SSH) | `session=False [logind:seat0 … greeter]` |
+
+**If `idle` is tagged `[logind]` instead of `[input]`,** the service user cannot read `/dev/input`. Check
+that `id labsense` lists `input`, then re-run `deploy_agent.sh`.
+**If `session` is tagged `[utmp]` and `locked` is tagged `[none]`,** the agent cannot reach logind on the
+system bus.
+
+State rule to check on the dashboard afterwards:
+- Light typing keeps the PC **In use**.
+- 5 minutes hands-off and unlocked turns it **Available**.
+- A locked screen shows **In use** for 15 minutes, then **Available**, unless a CPU-heavy job is still
+  running (for example `stress --cpu 1`).
 
 ---
 

@@ -72,19 +72,22 @@ The browser never computes a state either - it only displays what it is told.
  Staleness grace period      15 s     backend/app/config.py           LABSENSE_HEARTBEAT_TIMEOUT_SECONDS
  Idle threshold              300 s    backend/app/config.py           LABSENSE_IDLE_THRESHOLD_SECONDS
  CPU threshold               5.0 %    backend/app/config.py           LABSENSE_CPU_THRESHOLD_PERCENT
+ CPU sustain window          3 hb     backend/app/config.py           LABSENSE_CPU_WINDOW_HEARTBEATS
+ Lock reserve                900 s    backend/app/config.py           LABSENSE_LOCK_RESERVE_SECONDS
  Software scan interval      300 s    agent config.py                 LABSENSE_SOFTWARE_SCAN_INTERVAL
  Agent reconnect back-off    5s, 10s, 20s, 40s, 60s (cap); resets after a successful connect
  Browser WS reconnect delay  3 s      frontend WebSocketContext.jsx   (none)
- Telemetry probe timeout     5 s each (up to 3 probes per heartbeat)
+ Telemetry probe timeout     5 s each; only used when logind is unreachable
 
  IMPORTANT: the thresholds live on the SERVER. Changing them on the agent does
  nothing. Restart the backend after changing them.
 
  Real heartbeat period = 5 s sleep + time spent collecting telemetry.
  Normally ~5.1 s. The agent sleeps AFTER sending, so slow probes stretch the
- period. [QUIRK] Worst case all three subprocess probes hit their 5 s timeout,
- giving a ~20 s period - longer than the 15 s grace period, so the card would
- flicker to Available between heartbeats.
+ period. In production every value comes from logind (one D-Bus round trip)
+ or the in-process input tracker, so no subprocess runs per heartbeat. The
+ subprocess fallbacks (5 s timeout each, child killed on timeout) only run
+ when logind is unreachable.
 
 
 -------------------------------------------------------------------------------
@@ -109,8 +112,17 @@ The browser never computes a state either - it only displays what it is told.
    MAINTENANCE.
 
  EFFECT ON STATE
-   cpu_percent > 5.0 (strictly greater) counts as "activity" for IN_USE,
-   but ONLY if session_active is true. See section 7.
+   CPU counts as "activity" for IN_USE only when it is SUSTAINED: every one
+   of the last 3 heartbeats (~15 s) must be > 5.0 % (strictly greater), and
+   only if session_active is true. See section 7.
+   - A single spike (apt, snapd, file indexing) never marks a PC in use.
+   - A PC becomes IN_USE via CPU ~15 s after a job starts, and drops out of
+     it on the first heartbeat at or below the threshold.
+   - Light work (typing, reading, browsing) is usually 1-3 % on a multi-core
+     machine. That is detected through idle time, not CPU. CPU is the
+     backup signal for long unattended jobs (compiles, simulations).
+   - The card still shows the LATEST sample; only the decision uses the
+     window.
 
  SERVER DEFAULT if the field is missing from the message: 0.0
 
@@ -123,22 +135,31 @@ The browser never computes a state either - it only displays what it is told.
 -------------------------------------------------------------------------------
 
  SOURCE (agent)                                  telemetry.py: get_idle_seconds()
-   Tried in order, first success wins:
-   1. `xprintidle`  -> milliseconds since last X11 keyboard/mouse input, // 1000
-   2. Newest mtime among /dev/input/event*  -> now - mtime
-   3. Give up       -> 0
+   MEANING: seconds since the last keyboard, mouse, touchpad or touchscreen
+   input on this machine. NOT uptime, NOT session length.
 
- [QUIRK - IMPORTANT] Under the systemd deployment this value is unreliable:
-   - The service runs as the `labsense` system user with no DISPLAY or
-     XAUTHORITY, so xprintidle cannot talk to the logged-in user's X server
-     and method 1 fails.
-   - Method 2 is broken in principle: device-node mtimes do NOT change when
-     you type or move the mouse. It effectively reports seconds since boot.
-   - If both fail, 0 is sent, which the server reads as "just active".
-   Running the agent in the foreground as the logged-in desktop user (with
-   xprintidle installed) gives correct values.
-   Also: xprintidle is X11-only. On a Wayland session it fails even when run
-   as the logged-in user.
+   Tried in order, first success wins:
+   1. Input devices (input_idle.py, InputIdleTracker)
+      The agent opens /dev/input/event* for devices udev tags as keyboard,
+      mouse, touchpad, touchscreen or tablet (power button, lid switch and
+      sensors are skipped). It records only the ARRIVAL TIME of events. The
+      bytes are discarded unread, so key contents are never seen. Exact to
+      the second, works on X11, Wayland and text consoles. It needs the
+      service user in the `input` group (deploy_agent.sh does this, and
+      the unit has SupplementaryGroups=input). New devices are picked up
+      within 30 s.
+      Returns "unknown" (-> next source) until the first input event after
+      the agent starts.
+   2. logind IdleHint / IdleSinceHint for the seat0 session
+      Set by the desktop after ITS OWN idle delay (GNOME: Settings -> Power
+      -> Screen Blank, default 5 min). Coarse: reads 0 until that delay
+      passes, then jumps to the true idle time.
+   3. `xprintidle` - only works when the agent runs inside an X11 session.
+   4. Give up -> 0 (a WARNING is logged once).
+
+   (The old fallback, "newest mtime of /dev/input/event*", was removed. The
+   kernel does not update that timestamp on input, so it really measured
+   time since the device node was created, roughly since boot.)
 
  WHEN IT UPDATES
    Every heartbeat (~5 s), unconditionally. It is sampled - the card jumps
@@ -147,7 +168,7 @@ The browser never computes a state either - it only displays what it is told.
 
  EFFECT ON STATE
    idle_seconds < 300 (strictly less) counts as "activity" for IN_USE,
-   but ONLY if session_active is true.
+   but ONLY if session_active is true. This is the primary signal.
 
  SERVER DEFAULT if missing: 0   (note: 0 means "active", not "unknown")
 
@@ -162,22 +183,16 @@ The browser never computes a state either - it only displays what it is told.
 -------------------------------------------------------------------------------
 
  SOURCE (agent)                                  telemetry.py: get_session_active()
-   len(psutil.users()) > 0
-   psutil.users() reads the utmp login records - the same list `who` shows.
+   1. logind: seat0 has an ActiveSession whose Class is "user" and which
+      is Active. Read over the system bus (dbus_monitor.get_session_hints).
+   2. Fallback when logind is unreachable: len(psutil.users()) > 0 (utmp).
 
- What counts as a session:
-   - A local graphical or console login          -> true (usually)
-   - An SSH login from another machine           -> true   [QUIRK]
-   - A tmux/screen session left running          -> can be true
-   - Login screen showing, nobody logged in      -> false
-
- [QUIRK] Some Wayland display managers do not write a utmp record for the
-         graphical session. Run `who` on the demo machines while logged in -
-         if your desktop login doesn't appear there, session_active will be
-         false and the PC will never show IN_USE.
-
- This is NOT sourced from logind/D-Bus, despite the architecture doc's
- framing. Only lock and sleep/shutdown events come from logind.
+ What counts as a session (logind source):
+   - Someone logged in at the PC's own screen/keyboard  -> true
+   - Login screen showing (GDM greeter, Class=greeter)   -> false
+   - An SSH login from another machine                   -> false (no seat)
+   - A user switched away (fast user switching)          -> only the
+                                                             foreground one
 
  WHEN IT UPDATES
    Every heartbeat (~5 s), unconditionally.
@@ -196,45 +211,35 @@ The browser never computes a state either - it only displays what it is told.
 6. ATTRIBUTE: screen_locked   (card label: "Screen")
 -------------------------------------------------------------------------------
 
- SOURCE (agent) - two independent sources, OR'ed together:
+ SOURCE (agent)                                  telemetry.py: get_screen_locked()
+   1. logind LockedHint on the seat0 session - authoritative when logind is
+      reachable. GNOME/KDE lock screens (Super+L, auto-lock after screen
+      blank, lock on suspend) set it on the system bus, so the service user
+      can read it without the user's display or session bus.
+   2. Fallback: `dbus-send --session ... ScreenSaver.GetActive` (only works
+      when the agent runs inside the user's session).
+   3. Give up -> false.
 
-   screen_locked = probe_result  OR  logind_flag           (main.py heartbeat loop)
-
-   probe_result - polled on every heartbeat          telemetry.py: get_screen_locked()
-     1. `xdg-screensaver status`  -> "enabled" = locked
-     2. `dbus-send --session ... org.freedesktop.ScreenSaver.GetActive`
-     3. Give up -> false
-
-   logind_flag - event-driven, a module global in main.py
-     set True  on the logind Session `Lock` D-Bus signal
-     set False on the logind Session `Unlock` D-Bus signal
-
- [QUIRK] Under the systemd deployment both sources are weak:
-   - The probe needs the user's session bus / display; the system user has
-     neither, so it returns false.
-   - logind only emits Lock/Unlock when something calls LockSession
-     (e.g. `loginctl lock-session`). GNOME's own lock screen typically sets
-     the session's LockedHint property instead and may emit no signal.
-   Test both `loginctl lock-session` and locking from the desktop UI.
-
- [QUIRK] Because of the OR, if the agent receives a Lock signal but misses
-         the matching Unlock (e.g. the D-Bus listener was restarting at that
-         moment), screen_locked stays true until the next Unlock signal or an
-         agent restart.
-
- [QUIRK] The Lock/Unlock match rule is not filtered to one session - a lock
-         signal for ANY session on the machine sets the flag.
+   Removed: `xdg-screensaver status` (reports whether the screensaver is
+   ENABLED, not whether the screen is locked) and the Lock/Unlock signal
+   latch (only `loginctl lock-session` emits those signals, and a UI unlock
+   left it stuck at true). The signals are still logged.
 
  WHEN IT UPDATES
-   Sent on every heartbeat. The logind flag itself changes instantly when the
-   signal arrives, but it is only transmitted with the NEXT heartbeat - so the
-   dashboard lags a lock by up to ~5 s. No message is sent on lock alone.
+   Polled on every heartbeat, so the dashboard shows a lock within ~5 s.
 
- EFFECT ON STATE
-   screen_locked = true counts as "activity" for IN_USE (a locked PC is
-   considered occupied - someone stepped away), ONLY if session_active.
-   There is no timeout: a PC locked for 8 hours stays IN_USE.
-   (Open design question - see md_files/progress.md.)
+ EFFECT ON STATE  (lock reserve)
+   The server records locked_since when screen_locked goes false -> true.
+   A locked screen counts as "activity" for IN_USE for LOCK_RESERVE_SECONDS
+   (900 s = 15 min) after locking, ONLY if session_active. That covers a short
+   break without letting an abandoned, auto-locked PC look busy all day.
+   After the reserve expires the PC is IN_USE only if idle/CPU say so.
+   Since locking blocks input to the desktop, a locked PC with no sustained
+   CPU job becomes AVAILABLE at the 15 minute mark.
+   Unlocking clears locked_since, and the next lock starts a fresh 15 minutes.
+   [QUIRK] locked_since lives in server memory. After a backend restart, a PC
+           that was already locked gets a fresh 15 minutes from its first
+           heartbeat.
 
  SERVER DEFAULT if missing: false
 
@@ -251,16 +256,16 @@ The browser never computes a state either - it only displays what it is told.
 
  7.1  On every HEARTBEAT (handle_heartbeat)
 
-   Step 1. If current state is MAINTENANCE:
-             store the 4 telemetry values, restart the staleness timer,
-             DO NOT change state. Stop.
-   Step 2. Store the 4 telemetry values.
+   Step 1. Store the 4 telemetry values, append cpu to the 3-sample window,
+           and update locked_since (all of this also happens in MAINTENANCE).
+   Step 2. If current state is MAINTENANCE: restart the staleness timer,
+           DO NOT change state. Stop.
    Step 3. Evaluate:
 
              IN_USE  if   session_active
                      AND (   idle_seconds  <  300
-                          OR cpu_percent   >  5.0
-                          OR screen_locked )
+                          OR every one of the last 3 cpu samples > 5.0
+                          OR (screen_locked AND locked < 900 s ago) )
              AVAILABLE    otherwise
 
    Step 4. Restart the 15 s staleness timer.
@@ -270,10 +275,9 @@ The browser never computes a state either - it only displays what it is told.
      - A heartbeat ALWAYS recomputes from scratch. It overrides
        AVAILABLE_SLEEP (i.e. waking up) and any previous state. Only
        MAINTENANCE is sticky.
-     - There is no hysteresis/debounce on the thresholds. CPU oscillating
-       around 5% with a long-idle, unlocked user flips the state on every
-       heartbeat.
-     - Evaluation uses only the current heartbeat - no averaging over time.
+     - CPU is debounced (it must stay above the threshold for 3 heartbeats in a row
+       to count). Idle has its own 300 s hysteresis. A CPU load hovering around 5%
+       can still flip the state, but at most once per ~15 s.
 
  7.2  On GOING_TO_SLEEP (handle_going_to_sleep)
 
@@ -358,7 +362,9 @@ The browser never computes a state either - it only displays what it is told.
 8. STATE TRANSITION TABLE
 -------------------------------------------------------------------------------
 
- "active" below means:  session_active AND (idle < 300 OR cpu > 5 OR locked)
+ "active" below means:  session_active AND (idle < 300
+                                           OR cpu > 5 on the last 3 hb
+                                           OR locked less than 15 min ago)
 
  FROM              EVENT                            TO               WHEN
  ----------------  -------------------------------  ---------------  ----------------------
@@ -387,8 +393,10 @@ The browser never computes a state either - it only displays what it is told.
 
  How "not active" typically happens:
    - user logs out                                -> session_active false
-   - user walks away, screen NOT locked, CPU
-     quiet (<= 5%), for 5+ minutes                -> idle >= 300
+   - user walks away, screen NOT locked, no
+     sustained CPU, for 5+ minutes               -> idle >= 300
+   - user locks the screen and doesn't return
+     within 15 minutes, no sustained CPU         -> lock reserve expires
 
 
 -------------------------------------------------------------------------------
@@ -596,13 +604,16 @@ The browser never computes a state either - it only displays what it is told.
  B) Student leaves WITHOUT locking or logging out
     t=0      last keystroke
     every 5s hb: idle climbs 5, 10, ...     -> stays IN_USE (idle < 300)
-    t~300s   hb: idle >= 300, cpu <= 5      -> AVAILABLE
-             (if a background job keeps CPU > 5%, it stays IN_USE)
-    Depends on working idle detection - see section 4.
+    t~300s   hb: idle >= 300, no sustained cpu -> AVAILABLE
+             (if a job keeps CPU > 5% on every heartbeat, it stays IN_USE)
+    Note: GNOME usually blanks and auto-locks around t=300s too, which starts
+    the lock reserve (scenario C) and keeps the PC IN_USE for another 15 min.
 
  C) Student locks the screen and leaves
-    t<=5s    hb: locked true                -> IN_USE, and it stays IN_USE for
-                                               as long as the screen is locked
+    t<=5s    hb: locked true                -> IN_USE (lock reserve starts)
+    t=15min  hb: reserve expired            -> AVAILABLE, unless a CPU job is
+                                               still running
+    returns  unlocks                        -> input resets idle -> IN_USE
 
  D) Student logs out
     t<=5s    hb: session false              -> AVAILABLE regardless of CPU
@@ -647,21 +658,22 @@ The browser never computes a state either - it only displays what it is told.
 -------------------------------------------------------------------------------
 
  Agent-side data quality
-  Q1  idle_seconds unreliable under systemd (no DISPLAY; /dev/input mtime
-      doesn't track input; fallback 0 reads as "active").          section 4
-  Q2  screen_locked probably always false under systemd; the GNOME UI
-      lock may not emit the logind Lock signal.                    section 6
-  Q3  session_active counts SSH logins and may miss some Wayland
-      desktop logins.                                              section 5
-  Q4  The first CPU reading after agent start is meaningless.      section 3
-  Q5  Slow telemetry probes can stretch the heartbeat period past
-      the 15 s grace period.                                       section 2
+  Q1  RESOLVED - idle_seconds now comes from input-device timing,
+      then logind IdleHint.                                        section 4
+  Q2  RESOLVED - screen_locked now read from logind LockedHint.    section 6
+  Q3  RESOLVED - session_active now means a user session on the
+      physical seat (SSH and the login screen excluded).           section 5
+  Q4  The first CPU reading after agent start is meaningless (now
+      harmless: one sample can't satisfy the 3-heartbeat window).  section 3
+  Q5  RESOLVED in production - no subprocess probes run per
+      heartbeat while logind is reachable.                         section 2
 
  State logic
   Q6  Clean shutdown shows "Sleep", not "Available", and never
       times out.                                                   section 7.2
-  Q7  A locked screen keeps a PC IN_USE forever (no lock timeout). section 6
-  Q8  No hysteresis: values hovering at a threshold flap the state. section 7.1
+  Q7  RESOLVED - a lock reserves the PC for 15 min, then expires.  section 6
+  Q8  PARTLY - CPU is debounced over 3 heartbeats; values hovering
+      at a threshold can still flap, at most once per ~15 s.       section 7.1
   Q9  Maintenance is lost when the backend restarts and the agent
       reconnects.                                                  section 7.6
   Q10 After a backend restart, a dead PC shows its last persisted

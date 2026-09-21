@@ -64,8 +64,10 @@ async def run_mock_pc(pc_id: str):
                 writer.write(encode_message(msg))
                 await writer.drain()
 
-                state_desc = "IN_USE" if session_active and (idle_seconds < 300 or cpu_percent > 5.0 or screen_locked) else "AVAILABLE"
-                print(f"[{pc_id}] Heartbeat sent -> State: {state_desc} (CPU: {cpu_percent}%, Session: {session_active})")
+                # The backend decides the state (CPU is averaged over several
+                # heartbeats and locks expire), so just report what was sent.
+                print(f"[{pc_id}] Heartbeat sent (session={session_active}, locked={screen_locked}, "
+                      f"idle={idle_seconds}s, cpu={cpu_percent}%)")
 
                 await asyncio.sleep(5.0)
 

@@ -4,19 +4,37 @@ Collects CPU usage, session state, screen-lock status, and user idle time.
 All functions are non-blocking — subprocess calls use asyncio.create_subprocess_exec
 to avoid stalling the single-threaded event loop.
 
-Platform: Linux (X11/Wayland with graceful fallbacks).
+The agent normally runs as a systemd service under a dedicated system user,
+with no X display and no session bus.  Per-user tools (``xprintidle``,
+``xdg-screensaver``, ``dbus-send --session``) therefore fail in production, so
+each value is read from a source that works from a system service first:
+
+- session / lock / coarse idle  → systemd-logind hints on the *system* bus
+  (``LogindMonitor.get_session_hints()``)
+- precise idle                  → kernel input devices (``InputIdleTracker``)
+
+The per-user tools remain only as fallbacks for running the agent by hand
+inside a desktop session.
+
+Each ``get_*`` function returns ``(value, source)``; the source string is what
+``probe_telemetry.py`` prints, so each probe can be checked on real hardware.
+
+Platform: Linux (X11/Wayland).
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 
 import psutil
 
+from .input_idle import InputIdleTracker
+
 logger = logging.getLogger(__name__)
+
+_warned_no_idle = False
 
 
 def get_cpu_percent() -> float:
@@ -32,122 +50,110 @@ def get_cpu_percent() -> float:
     return psutil.cpu_percent(interval=None)
 
 
-def get_session_active() -> bool:
-    """Check whether at least one interactive user session is logged in.
+async def _run(*argv: str, timeout: float = 5.0) -> tuple[int, str] | None:
+    """Run a short command, returning (returncode, stdout) or None on failure.
 
-    Uses ``psutil.users()`` which reads utmp records — cheap and non-blocking.
+    Kills the child on timeout so a hung probe can't leak a process per
+    heartbeat.
     """
     try:
-        users = psutil.users()
-        return len(users) > 0
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except (FileNotFoundError, PermissionError):
+        return None
+    try:
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        logger.debug('%s timed out', argv[0])
+        return None
+    return proc.returncode, stdout.decode(errors='replace').strip()
+
+
+def get_session_active(hints: dict | None) -> tuple[bool, str]:
+    """Is a user logged in at the physical seat?
+
+    logind's active session on seat0 with ``Class == 'user'`` — the GDM
+    greeter (class ``greeter``) and SSH logins (no seat) do not count.
+    Falls back to ``psutil.users()`` (utmp) when logind is unreachable.
+    """
+    if hints is not None:
+        if not hints.get('present'):
+            return False, 'logind:seat0 empty'
+        active = hints.get('class') == 'user' and hints.get('active', False)
+        return active, f"logind:seat0 {hints.get('id')} {hints.get('class')}"
+
+    try:
+        return len(psutil.users()) > 0, 'utmp'
     except Exception as exc:
         logger.warning('Failed to query user sessions: %s', exc)
-        return False
+        return False, 'none'
 
 
-async def get_screen_locked() -> bool:
-    """Attempt to detect whether the screen is currently locked.
+async def get_screen_locked(hints: dict | None) -> tuple[bool, str]:
+    """Is the seat's session showing the lock screen?
 
-    Strategy (tried in order):
-    1. ``xdg-screensaver status`` — returns "enabled" (blanked / locked) or
-       "disabled" (not locked).  Works on most X11 desktops.
-    2. D-Bus query to ``org.freedesktop.ScreenSaver.GetActive`` — works on
-       KDE, some GNOME versions, and other FreeDesktop-compliant desktops.
+    1. logind ``LockedHint`` — authoritative; set by GNOME/KDE lock screens.
+    2. ``org.freedesktop.ScreenSaver.GetActive`` on the session bus — only
+       reachable when the agent runs inside the user's session.
 
-    If neither method succeeds, returns ``False`` and logs a warning once.
+    (``xdg-screensaver status`` was removed: it reports whether the
+    screensaver is *enabled*, not whether the screen is locked.)
     """
-    # --- Method 1: xdg-screensaver status ---
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            'xdg-screensaver', 'status',
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5.0)
-        status = stdout.decode().strip().lower()
-        if status in ('enabled', 'disabled'):
-            return status == 'enabled'
-    except FileNotFoundError:
-        logger.debug('xdg-screensaver not found, trying D-Bus fallback')
-    except asyncio.TimeoutError:
-        logger.debug('xdg-screensaver timed out')
-    except Exception as exc:
-        logger.debug('xdg-screensaver failed: %s', exc)
+    if hints is not None:
+        return bool(hints.get('present') and hints.get('locked')), 'logind'
 
-    # --- Method 2: D-Bus org.freedesktop.ScreenSaver.GetActive ---
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            'dbus-send', '--session', '--dest=org.freedesktop.ScreenSaver',
-            '--type=method_call', '--print-reply',
-            '/org/freedesktop/ScreenSaver',
-            'org.freedesktop.ScreenSaver.GetActive',
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5.0)
-        output = stdout.decode().strip()
-        # Output looks like: "   boolean true" or "   boolean false"
-        return 'boolean true' in output
-    except FileNotFoundError:
-        logger.debug('dbus-send not found')
-    except asyncio.TimeoutError:
-        logger.debug('D-Bus ScreenSaver query timed out')
-    except Exception as exc:
-        logger.debug('D-Bus ScreenSaver query failed: %s', exc)
+    result = await _run(
+        'dbus-send', '--session', '--dest=org.freedesktop.ScreenSaver',
+        '--type=method_call', '--print-reply',
+        '/org/freedesktop/ScreenSaver',
+        'org.freedesktop.ScreenSaver.GetActive',
+    )
+    if result and result[0] == 0:
+        return 'boolean true' in result[1], 'screensaver-dbus'
 
-    logger.debug('Screen lock detection unavailable — defaulting to False')
-    return False
+    return False, 'none'
 
 
-async def get_idle_seconds() -> int:
-    """Return the number of seconds since the last user input event.
+async def get_idle_seconds(
+    hints: dict | None,
+    tracker: InputIdleTracker | None,
+) -> tuple[int, str]:
+    """Seconds since the last keyboard/mouse/touch input on this machine.
 
-    Strategy (tried in order):
-    1. ``xprintidle`` — gives milliseconds since last X11 input event.
-       Extremely lightweight, but requires the package to be installed.
-    2. ``/dev/input/event*`` — stat the most recently modified input device
-       file and compute seconds since that timestamp.  Requires read
-       permission on device files (the ``input`` group, or running as root).
+    1. ``InputIdleTracker`` — exact, from /dev/input event timing.
+    2. logind ``IdleHint``/``IdleSinceHint`` — coarse: reads 0 until the
+       desktop's own idle delay (GNOME default 5 min) passes, then the true
+       idle time.
+    3. ``xprintidle`` — only works inside an X11 session.
 
-    If both methods fail, returns ``0`` (assumes active) and logs a warning.
+    If nothing works, returns 0 (treated as "active") and warns once.
     """
-    # --- Method 1: xprintidle ---
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            'xprintidle',
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5.0)
-        if proc.returncode == 0:
-            idle_ms = int(stdout.decode().strip())
-            return idle_ms // 1000
-    except FileNotFoundError:
-        logger.debug('xprintidle not found, trying /dev/input fallback')
-    except asyncio.TimeoutError:
-        logger.debug('xprintidle timed out')
-    except (ValueError, Exception) as exc:
-        logger.debug('xprintidle failed: %s', exc)
+    global _warned_no_idle
 
-    # --- Method 2: /dev/input/event* modification times ---
-    try:
-        input_dir = '/dev/input'
-        if os.path.isdir(input_dir):
-            latest_mtime = 0.0
-            for entry in os.listdir(input_dir):
-                if entry.startswith('event'):
-                    path = os.path.join(input_dir, entry)
-                    try:
-                        st = os.stat(path)
-                        if st.st_mtime > latest_mtime:
-                            latest_mtime = st.st_mtime
-                    except OSError:
-                        continue
-            if latest_mtime > 0.0:
-                idle = int(time.time() - latest_mtime)
-                return max(idle, 0)
-    except Exception as exc:
-        logger.debug('/dev/input idle detection failed: %s', exc)
+    if tracker is not None:
+        idle = tracker.idle_seconds()
+        if idle is not None:
+            return idle, 'input'
 
-    logger.debug('Idle time detection unavailable — defaulting to 0')
-    return 0
+    if hints is not None:
+        if hints.get('present') and hints.get('idle_hint') and hints.get('idle_since_us'):
+            idle = int(time.time() - hints['idle_since_us'] / 1_000_000)
+            return max(idle, 0), 'logind'
+        return 0, 'logind'
+
+    result = await _run('xprintidle')
+    if result and result[0] == 0:
+        try:
+            return int(result[1]) // 1000, 'xprintidle'
+        except ValueError:
+            pass
+
+    if not _warned_no_idle:
+        _warned_no_idle = True
+        logger.warning('Idle time unavailable from every source — reporting 0')
+    return 0, 'none'
