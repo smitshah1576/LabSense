@@ -74,8 +74,12 @@ async def scan_pip() -> list[str]:
         available or the output cannot be parsed.
     """
     try:
+        # --disable-pip-version-check: when PyPI is unreachable (offline lab
+        # networks, TLS-intercepting proxies) pip's self-check prints "Could
+        # not fetch URL ..." to *stdout* after the JSON, which made the parse
+        # below fail and silently dropped every pip package from the scan.
         proc = await asyncio.create_subprocess_exec(
-            'pip', 'list', '--format=json',
+            'pip', 'list', '--format=json', '--disable-pip-version-check',
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
