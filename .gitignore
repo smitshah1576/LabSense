@@ -55,3 +55,6 @@ Thumbs.db
 # Docker / Logs
 *.log
 pgdata/
+
+# Testbed runtime state (pid files, logs)
+testbed/.run/

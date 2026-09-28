@@ -1,0 +1,109 @@
+# LabSense testbed — a simulated lab of client PCs.
+#
+# Five containers on their own "lab LAN" (172.28.0.0/24), one per seeded PC in
+# Lab A, each connecting to the backend's TCP heartbeat port on the host:
+#
+#   lab-a-pc-1..4   testbed/mock_pc.py — scenario-driven mock PCs, each with an
+#                   HTTP control API published on 127.0.0.1:7001..7004
+#   lab-a-pc-5      the real agent (agent/Dockerfile), unmodified
+#
+# The backend, frontend and database are not in this file: the database comes
+# from the repo's docker-compose.yml and the backend/frontend run on the host,
+# exactly as SETUP_UBUNTU.md describes. `testbed/testbed.sh up` starts it all.
+#
+# Keep testbed/pcctl's FLEET table in step with the services below.
+
+name: labsense-testbed
+
+x-mock-pc: &mock-pc
+  image: python:3.11-slim
+  command: ["python", "-u", "/testbed/mock_pc.py"]
+  volumes:
+    # The mock imports labsense_agent.protocol, so it shares the real agent's
+    # wire format rather than re-implementing it.
+    - ../agent:/agent:ro
+    - ./mock_pc.py:/testbed/mock_pc.py:ro
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  restart: unless-stopped
+
+x-server-env: &server-env
+  LABSENSE_SERVER_HOST: ${LABSENSE_SERVER_HOST:-host.docker.internal}
+  LABSENSE_SERVER_PORT: ${LABSENSE_SERVER_PORT:-9000}
+
+services:
+  lab-a-pc-1:
+    <<: *mock-pc
+    container_name: lab-a-pc-1
+    hostname: lab-a-pc-1
+    environment:
+      <<: *server-env
+      LABSENSE_PC_ID: lab-a-pc-1
+      MOCK_PC_SCENARIO: in-use
+      MOCK_PC_SOFTWARE: code,nodejs,npm,python3-venv
+    ports: ["127.0.0.1:7001:7000"]
+    networks:
+      lab-lan: { ipv4_address: 172.28.0.11 }
+
+  lab-a-pc-2:
+    <<: *mock-pc
+    container_name: lab-a-pc-2
+    hostname: lab-a-pc-2
+    environment:
+      <<: *server-env
+      LABSENSE_PC_ID: lab-a-pc-2
+      MOCK_PC_SCENARIO: idle
+      MOCK_PC_SOFTWARE: openjdk-17-jdk,eclipse,maven
+    ports: ["127.0.0.1:7002:7000"]
+    networks:
+      lab-lan: { ipv4_address: 172.28.0.12 }
+
+  lab-a-pc-3:
+    <<: *mock-pc
+    container_name: lab-a-pc-3
+    hostname: lab-a-pc-3
+    environment:
+      <<: *server-env
+      LABSENSE_PC_ID: lab-a-pc-3
+      MOCK_PC_SCENARIO: locked
+      MOCK_PC_SOFTWARE: octave,r-base,python3-numpy,python3-pandas,jupyter-notebook
+    ports: ["127.0.0.1:7003:7000"]
+    networks:
+      lab-lan: { ipv4_address: 172.28.0.13 }
+
+  lab-a-pc-4:
+    <<: *mock-pc
+    container_name: lab-a-pc-4
+    hostname: lab-a-pc-4
+    environment:
+      <<: *server-env
+      LABSENSE_PC_ID: lab-a-pc-4
+      MOCK_PC_SCENARIO: cpu-busy
+      MOCK_PC_SOFTWARE: blender,gimp,nvidia-cuda-toolkit,python3-numpy
+    ports: ["127.0.0.1:7004:7000"]
+    networks:
+      lab-lan: { ipv4_address: 172.28.0.14 }
+
+  lab-a-pc-5:
+    build: ../agent
+    image: labsense-agent:testbed
+    container_name: lab-a-pc-5
+    hostname: lab-a-pc-5
+    environment:
+      <<: *server-env
+      LABSENSE_PC_ID: lab-a-pc-5
+      # Scan every minute instead of every five, so software search has
+      # real dpkg/pip data soon after `up`.
+      LABSENSE_SOFTWARE_SCAN_INTERVAL: "60"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    networks:
+      lab-lan: { ipv4_address: 172.28.0.15 }
+
+networks:
+  lab-lan:
+    name: labsense-lan
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24

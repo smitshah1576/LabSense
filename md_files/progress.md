@@ -28,6 +28,7 @@
 - `SETUP_UBUNTU.md` — all-in-one Ubuntu deployment.
 - `SETUP_WINDOWS_SERVER.md` — **backend/DB/frontend on Windows, agents on Ubuntu** (the current demo topology), including the network-reachability checks that distinguish a broken agent from blocked packets.
 - `TESTING.md` — ordered test procedure T1–T11. `agent/test_heartbeat.py` sends one raw protocol frame with no agent involved, which is the fastest way to tell a network problem from an agent problem.
+- `TESTBED.md` — single-machine E2E testbed (also runs in the Claude Code cloud environment): DB + backend + frontend, plus five client PCs on a Docker "lab LAN" — four scenario-driven mocks (`testbed/mock_pc.py`, driven with `testbed/pcctl`) and the real agent in a container. `testbed/testbed.sh test` runs an automated suite covering T2–T11.
 
 ## Not Started
 - Nothing from the original list remains wholly unstarted. Heartbeat staleness, software discovery & search, Lab State and the damage-report flow all now have working implementations end-to-end (verified against a live Postgres + backend + agent chain). What remains is the correctness work in Known Gaps below, plus hardening.
@@ -46,9 +47,12 @@ These are all in the agent, all Linux-specific, and all invisible from the dashb
 3. **Two `pc_id` conventions coexist.** Seed data uses `lab-a-pc-N`; `POST /admin/pcs` generates `<lab_id padded to 3><seq 2>` (e.g. `40801`). Both are currently live in the database. Pick one before the demo — an agent deployed against the wrong convention is now rejected loudly rather than silently, but it still won't report.
 4. **The GIN index on `installed_software` is not used by the search queries.** `EXISTS (… jsonb_array_elements_text … ILIKE …)` cannot use it, so both search endpoints are sequential scans. `architecture.md` §6 claims the index backs them. Either correct the claim or switch exact-name lookups to the `@>` containment operator, which can use the index.
 
+5. **Maintenance transitions are written twice.** `PUT /pcs/{id}/maintenance` and approving a damage report insert a `state_transitions` row after `set_maintenance()` has already inserted one via the transition callback, so the audit trail double-counts every maintenance change. Found by the E2E testbed; tracked by two strict-`xfail` tests in `testbed/tests/test_server.py`.
+
 ## Recent Corrections
 - Windows Fast Startup / sleep-signal behavior (see above) — corrected after being documented incorrectly earlier.
 - Heartbeat staleness was listed as "Not Started" long after it was implemented; corrected above.
 - **Lab State was computed in UTC** against local wall-clock operating hours and timetable slots, so every lab read CLOSED for the entire working day (09:00 IST = 03:30 UTC) and no timetable slot ever matched. Fixed — the clock now comes from `settings.TIMEZONE` (`Asia/Kolkata`). Requires the `tzdata` package when the backend runs on Windows.
 - **Unregistered `pc_id`s were dropped silently** by the TCP server. An agent with a mistyped or defaulted `pc_id` logged successful sends every 5 seconds while nothing reached the dashboard. The server now replies `REJECTED` and closes; the agent logs it as an error.
+- **The agent's pip scan silently returned nothing when PyPI was unreachable.** pip's self-version check printed `Could not fetch URL …` to stdout after the JSON, the parse failed, and every pip package was dropped (found by the E2E testbed). The scan now passes `--disable-pip-version-check`.
 - **The agent exited with code 0 if its D-Bus task ended**, which `Restart=on-failure` ignores — so a D-Bus hiccup silently stopped heartbeats and left the service reading `inactive (dead)`. The D-Bus listener is now supervised and retried, only the heartbeat task is terminal, and the unit uses `Restart=always`.
