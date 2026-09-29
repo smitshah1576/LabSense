@@ -1,0 +1,25 @@
+@startuml uml-state-diagram
+title LabSense - State Diagram: PC Status
+
+skinparam shadowing false
+skinparam state {
+  BackgroundColor #FFFFFF
+  BorderColor #3A6EA5
+}
+hide empty description
+
+state "Available" as Available
+state "In Use" as InUse
+state "Asleep" as Asleep
+state "Maintenance" as Maintenance
+
+[*] --> Available : PC registered
+Available -right-> InUse : someone starts\nusing it
+InUse -left-> Available : user leaves, or\nno signal for 15 s
+Available -left-> Asleep : PC goes\nto sleep
+Asleep -right-> Available : PC wakes up
+InUse --> Asleep : PC goes to sleep
+Available -down-> Maintenance : marked for\nmaintenance
+InUse -down-> Maintenance : marked for\nmaintenance
+Maintenance -up-> Available : maintenance\ncleared
+@enduml

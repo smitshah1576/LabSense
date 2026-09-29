@@ -1,217 +1,93 @@
 @startuml exp3-class-diagram
-' Experiment 3 - Class Diagram: LabSense domain model + server runtime
-title LabSense - Class Diagram (Domain Model and Server)
+title LabSense - Class Diagram
 
 skinparam shadowing false
 skinparam classAttributeIconSize 0
-skinparam packageStyle rectangle
 skinparam class {
   BackgroundColor #FFFFFF
   BorderColor #3A6EA5
 }
 hide empty members
 
-package "Domain model (persisted in PostgreSQL)" {
-
-  class User {
-    - userId : int
-    - email : String
-    - passwordHash : String
-    - fullName : String
-    - role : UserRole
-    + login(email : String, password : String) : Token
-    + hasRole(role : UserRole) : Boolean
-  }
-
-  class Lab {
-    - labId : String
-    - labName : String
-    - operatingStart : Time
-    - operatingEnd : Time
-    + computeState(now : DateTime) : LabState
-    + registerPC() : PC
-    + availablePCCount() : int
-  }
-
-  class PC {
-    - pcId : String
-    - currentState : PCState
-    - isMaintenance : Boolean
-    - lastHeartbeatAt : DateTime
-    - installedSoftware : List<String>
-    + setMaintenance(on : Boolean) : void
-    + updateSoftware(packages : List<String>) : void
-    + matchingPackages(query : String) : List<String>
-  }
-
-  class StateTransition {
-    - id : int
-    - fromState : PCState
-    - toState : PCState
-    - transitionedAt : DateTime
-  }
-
-  class TimetableSlot {
-    - timetableId : int
-    - dayOfWeek : int
-    - startTime : Time
-    - endTime : Time
-    - courseCode : String
-    + isActiveAt(now : DateTime) : Boolean
-    + cancelFor(date : Date, by : User) : SlotCancellation
-  }
-
-  class SlotCancellation {
-    - cancellationId : int
-    - cancelledForDate : Date
-  }
-
-  class DamageReport {
-    - reportId : int
-    - issueDescription : String
-    - status : DamageReportStatus
-    - createdAt : DateTime
-    - resolvedAt : DateTime
-    + approve(admin : User) : void
-    + dismiss(admin : User) : void
-  }
-
-  enum UserRole {
-    STUDENT
-    PROFESSOR
-    ADMIN
-  }
-
-  enum PCState {
-    AVAILABLE
-    IN_USE
-    AVAILABLE_SLEEP
-    MAINTENANCE
-  }
-
-  enum LabState {
-    OPEN
-    OCCUPIED
-    CLOSED
-  }
-
-  enum DamageReportStatus {
-    PENDING
-    APPROVED
-    DISMISSED
-  }
+abstract class User {
+  - name : String
+  - email : String
+  + login() : Boolean
 }
 
-package "Server runtime (one uvicorn process)" {
-
-  class HeartbeatServer <<TCP :9000>> {
-    - host : String
-    - port : int
-    + start() : void
-    + handleConnection(reader, writer) : void
-    - isRegistered(pcId : String) : Boolean
-    - reject(pcId : String) : void
-  }
-
-  class PCStateManager {
-    - states : Map<String, PCLiveState>
-    - lock : asyncio.Lock
-    + handleHeartbeat(pcId, sessionActive, screenLocked, idleSeconds, cpuPercent) : Transition
-    + handleGoingToSleep(pcId : String) : Transition
-    + setMaintenance(pcId : String, on : Boolean) : Transition
-    + getState(pcId : String) : PCLiveState
-    - resetStalenessTimer(pcId : String) : void
-    - stalenessTimeout(pcId : String) : void
-  }
-
-  class PCLiveState {
-    - pcId : String
-    - currentState : PCState
-    - sessionActive : Boolean
-    - screenLocked : Boolean
-    - idleSeconds : int
-    - cpuPercent : float
-    - cpuSamples : Deque<float>
-    - lockedSince : DateTime
-    - lastHeartbeatAt : DateTime
-    + recordTelemetry(sessionActive, screenLocked, idleSeconds, cpuPercent, now) : void
-    + isInUse(now : DateTime) : Boolean
-  }
-
-  class ConnectionManager {
-    - activeConnections : Set<WebSocket>
-    + connect(ws : WebSocket) : void
-    + disconnect(ws : WebSocket) : void
-    + broadcastPcUpdate(pcId : String, state : PCState) : void
-    + broadcastPcHeartbeat(pcId : String, telemetry) : void
-  }
-
-  class DashboardSession <<WebSocket>> {
-    - token : JWT
-    - role : UserRole
-    + receive(message : JSON) : void
-  }
-
-  class Settings <<configuration>> {
-    + HEARTBEAT_TIMEOUT_SECONDS : int = 15
-    + IDLE_THRESHOLD_SECONDS : int = 300
-    + CPU_THRESHOLD_PERCENT : float = 5.0
-    + CPU_WINDOW_HEARTBEATS : int = 3
-    + LOCK_RESERVE_SECONDS : int = 900
-    + TIMEZONE : String = "Asia/Kolkata"
-  }
+class Student {
+  + reportDamage(pc : PC) : DamageReport
 }
 
-package "Wire protocol (length-prefixed JSON over TCP)" {
-
-  abstract class AgentMessage {
-    # type : String
-    # pcId : String
-    # timestamp : DateTime
-    + encode() : bytes
-    + {static} decode(frame : bytes) : AgentMessage
-  }
-
-  class Heartbeat {
-    - sessionActive : Boolean
-    - screenLocked : Boolean
-    - idleSeconds : int
-    - cpuPercent : float
-  }
-
-  class GoingToSleep
-  class SoftwareReport {
-    - packages : List<String>
-  }
-  class Rejected {
-    - reason : String
-  }
+class Professor {
+  + setMaintenance(pc : PC) : void
+  + cancelSlot(slot : TimetableSlot) : void
 }
 
-' ---------------- Domain relationships ----------------
-Lab "1" *-- "0..*" PC : contains >
-Lab "1" *-- "0..*" TimetableSlot : schedules >
-TimetableSlot "1" *-- "0..*" SlotCancellation : overridden by >
-PC "1" *-- "0..*" StateTransition : history >
-PC "1" *-- "0..*" DamageReport : concerns <
-User "1" -- "0..*" DamageReport : files >
-User "0..1" -- "0..*" DamageReport : resolves >
-User "1" -- "0..*" SlotCancellation : cancels >
+class Admin {
+  + registerPC(lab : Lab) : PC
+  + reviewReport(report : DamageReport) : void
+}
 
-' ---------------- Runtime relationships ----------------
-HeartbeatServer "1" --> "1" PCStateManager : feeds telemetry >
-HeartbeatServer "1" --> "1" ConnectionManager : pushes telemetry >
-PCStateManager "1" *-- "0..*" PCLiveState : tracks >
-PCLiveState "0..1" --> "1" PC : live view of >
-ConnectionManager "1" o-- "0..*" DashboardSession : fans out to >
+class Lab {
+  - labId : String
+  - name : String
+  - openingHours : String
+  + getLabState() : String
+}
 
-PCStateManager ..> StateTransition : <<creates>>\n(transition callback)
-PCStateManager ..> ConnectionManager : <<notifies>>\n(transition callback)
-PCLiveState ..> Settings : reads rule thresholds
-HeartbeatServer ..> AgentMessage : decodes / encodes
+class PC {
+  - pcId : String
+  - state : PCState
+  - installedSoftware : List<String>
+  + updateState(hb : Heartbeat) : void
+  + hasSoftware(name : String) : Boolean
+}
 
-AgentMessage <|-- Heartbeat
-AgentMessage <|-- GoingToSleep
-AgentMessage <|-- SoftwareReport
-AgentMessage <|-- Rejected
+class TimetableSlot {
+  - day : String
+  - startTime : Time
+  - endTime : Time
+  - courseCode : String
+  + cancelFor(date : Date) : void
+}
+
+class DamageReport {
+  - description : String
+  - status : String
+  + approve() : void
+  + dismiss() : void
+}
+
+class Agent {
+  - pcId : String
+  + collectStatus() : Heartbeat
+  + sendHeartbeat() : void
+}
+
+class Heartbeat {
+  - cpuPercent : float
+  - idleSeconds : int
+  - sessionActive : Boolean
+  - screenLocked : Boolean
+}
+
+enum PCState {
+  AVAILABLE
+  IN_USE
+  ASLEEP
+  MAINTENANCE
+}
+
+User <|-- Student
+User <|-- Professor
+User <|-- Admin
+
+Lab "1" o-- "0..*" PC : contains
+Lab "1" *-- "0..*" TimetableSlot : has
+Student "1" -- "0..*" DamageReport : files
+DamageReport "0..*" -- "1" PC : about
+Agent "1" -- "1" PC : monitors
+Agent ..> Heartbeat : sends
+PC ..> PCState
 @enduml

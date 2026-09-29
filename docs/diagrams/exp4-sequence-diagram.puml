@@ -1,0 +1,36 @@
+@startuml exp4-sequence-diagram
+title LabSense - Sequence Diagram: Viewing Live PC Status
+
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+autonumber
+
+actor Student
+participant "Dashboard" as UI
+participant "LabSense Server" as Server
+database "Database" as DB
+participant "Lab PC Agent" as Agent
+
+Student -> UI : open lab page
+UI -> Server : request lab & PC status
+Server -> DB : read labs and PCs
+DB --> Server : lab & PC data
+Server --> UI : current status
+UI --> Student : show PC cards
+
+loop every 5 seconds
+  Agent -> Server : send heartbeat\n(CPU, idle time, session, lock)
+  Server -> DB : check PC is registered
+  DB --> Server : result
+  alt PC registered
+    Server -> Server : work out PC state\n(Available / In use)
+    opt state changed
+      Server -> DB : save state change
+    end
+    Server -> UI : push live update
+    UI --> Student : PC card updates
+  else PC not registered
+    Server --> Agent : reject heartbeat
+  end
+end
+@enduml

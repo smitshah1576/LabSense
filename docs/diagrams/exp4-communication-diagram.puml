@@ -1,0 +1,21 @@
+@startuml exp4-communication-diagram
+title LabSense - Communication Diagram: Viewing Live PC Status
+
+skinparam shadowing false
+skinparam defaultTextAlignment center
+skinparam rectangle {
+  BackgroundColor #FFFFFF
+  BorderColor #3A6EA5
+}
+
+actor Student
+rectangle "Dashboard" as UI
+rectangle "LabSense Server" as Server
+database "Database" as DB
+rectangle "Lab PC Agent" as Agent
+
+Student -right- UI : "1: open lab page →\n← 7: show updated PC card"
+UI -right- Server : "2: request status →\n← 6: push live update"
+Server -right- Agent : "← 4: send heartbeat"
+Server -down- DB : "↓ 3: read labs & PCs\n↓ 5: save state change"
+@enduml

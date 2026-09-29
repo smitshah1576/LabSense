@@ -1,0 +1,45 @@
+@startgantt exp7-gantt-chart
+title LabSense Mini Project - Gantt Chart
+printscale weekly zoom 2
+hide footbox
+Project starts 2026-07-27
+today is 2026-09-29 and is colored in #FFE8A3
+
+-- Planning --
+[Requirements & scope] as [T1] starts 2026-07-27 and lasts 8 days
+[System design] as [T2] starts 2026-08-04 and lasts 7 days
+
+-- Development --
+[Lab PC agent] as [T3] starts 2026-08-11 and lasts 18 days
+[Backend server] as [T4] starts 2026-08-11 and lasts 21 days
+[Frontend dashboard] as [T5] starts 2026-08-21 and lasts 20 days
+
+-- Testing --
+[Integration] as [T6] starts 2026-09-10 and lasts 12 days
+[System testing] as [T7] starts 2026-09-22 and lasts 14 days
+
+-- Deployment --
+[Lab deployment & pilot] as [T8] starts 2026-10-06 and lasts 14 days
+[Report & viva preparation] as [T9] starts 2026-10-20 and lasts 10 days
+
+[T1] -> [T2]
+[T2] -> [T3]
+[T2] -> [T4]
+[T2] -> [T5]
+[T3] -> [T6]
+[T4] -> [T6]
+[T5] -> [T6]
+[T6] -> [T7]
+[T7] -> [T8]
+[T8] -> [T9]
+
+[T1] is 100% completed
+[T2] is 100% completed
+[T3] is 100% completed
+[T4] is 100% completed
+[T5] is 100% completed
+[T6] is 100% completed
+[T7] is 50% completed
+
+[Final demo] happens 2026-10-29
+@endgantt
