@@ -1,6 +1,5 @@
 @startuml exp6-dfd-level0
-' Experiment 6 - DFD Level 0 (Context Diagram)
-' Notation: rectangle = external entity, ellipse = process, arrow = data flow.
+' Rectangle = external entity, ellipse = process, arrow = data flow.
 title LabSense - DFD Level 0 (Context Diagram)
 
 skinparam shadowing false
@@ -22,17 +21,17 @@ rectangle "Student" as Student
 rectangle "Professor" as Professor
 rectangle "Admin" as Admin
 
-usecase "0\n\nLabSense\nLab Monitoring\nSystem" as P0
+usecase "0\n\nLabSense\nSystem" as P0
 
-Agent -right-> P0 : heartbeat telemetry\nsleep notice\nsoftware inventory
+Agent -right-> P0 : PC status
 P0 -left-> Agent : rejection notice
 
-Student -down-> P0 : login credentials\nsoftware query\ndamage report
-P0 -up-> Student : auth token\nlive lab & PC status\nsoftware search results
+Student -down-> P0 : login details\nsoftware search\ndamage report
+P0 -up-> Student : live lab status\nsearch results
 
-Professor -left-> P0 : login credentials\nmaintenance toggle\nslot cancellation
-P0 -right-> Professor : auth token\nlive lab & PC status\nlab timetable
+Professor -left-> P0 : login details\nmaintenance request\nslot cancellation
+P0 -right-> Professor : live lab status
 
-Admin -up-> P0 : login credentials\nlab & PC registration\ntimetable entries\nreport decision\nmaintenance toggle
-P0 -down-> Admin : auth token\nlive lab & PC status\npending damage reports
+Admin -up-> P0 : login details\nlab & PC details\nreport decision
+P0 -down-> Admin : live lab status\ndamage reports
 @enduml

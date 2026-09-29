@@ -1,0 +1,57 @@
+@startuml exp5-activity-diagram
+title LabSense - Activity Diagram: Updating a PC's Status
+
+skinparam shadowing false
+skinparam activity {
+  BackgroundColor #FFFFFF
+  BorderColor #3A6EA5
+  DiamondBackgroundColor #F5F8FC
+}
+skinparam swimlane {
+  BorderColor #9AA5B1
+  TitleFontStyle bold
+}
+
+|Lab PC Agent|
+start
+repeat
+  :Collect PC status
+  (CPU, idle time, session, lock);
+  :Send heartbeat to server;
+
+  |Server|
+  if (PC registered?) then (no)
+    :Reject heartbeat;
+    stop
+  else (yes)
+  endif
+
+  if (Under maintenance?) then (yes)
+    :Keep status "Maintenance";
+  else (no)
+    if (Someone using the PC?) then (yes)
+      :Mark PC "In use";
+    else (no)
+      :Mark PC "Available";
+    endif
+  endif
+
+  if (Status changed?) then (yes)
+    :Save change to database;
+  else (no)
+  endif
+  :Push live update;
+
+  |Dashboard|
+  :Refresh PC card;
+
+  |Lab PC Agent|
+  :Wait 5 seconds;
+repeat while (PC switched on?) is (yes)
+->no;
+
+|Server|
+:Mark PC "Available"
+after 15 s of silence;
+stop
+@enduml

@@ -1,14 +1,9 @@
 @startuml exp6-dfd-level1
-' Experiment 6 - DFD Level 1: process 0 exploded into its major functions.
-' Notation: rectangle = external entity, ellipse = process,
-' cylinder = data store (D = PostgreSQL table, M = in-memory store).
-' A two-headed arrow is a read/write pair, labelled "in / out".
+' Rectangle = external entity, ellipse = process, cylinder = data store.
 title LabSense - DFD Level 1
 
 skinparam shadowing false
 skinparam defaultTextAlignment center
-skinparam nodesep 60
-skinparam ranksep 70
 skinparam rectangle {
   BackgroundColor #EEF2F7
   BorderColor #1F2933
@@ -25,74 +20,52 @@ skinparam database {
 }
 skinparam ArrowColor #1F2933
 
-' ---------------- External entities ----------------
 rectangle "Student" as Student
 rectangle "Professor" as Professor
 rectangle "Admin" as Admin
 rectangle "Lab PC Agent" as Agent
 
-' ---------------- Processes ----------------
-usecase "1.0\nAuthenticate\nUser" as P1
-usecase "7.0\nSearch\nSoftware" as P7
-usecase "6.0\nManage Damage Reports\n& Maintenance" as P6
-usecase "5.0\nAdminister Labs,\nPCs & Timetable" as P5
-usecase "4.0\nPublish Live\nLab & PC Status" as P4
-usecase "2.0\nIngest Agent\nMessages" as P2
-usecase "3.0\nDetermine\nPC State" as P3
+usecase "1.0\nLog In" as P1
+usecase "2.0\nProcess\nPC Status" as P2
+usecase "3.0\nShow Live\nLab Status" as P3
+usecase "4.0\nSearch\nSoftware" as P4
+usecase "5.0\nManage Labs\n& Timetable" as P5
+usecase "6.0\nHandle Damage\nReports" as P6
 
-' ---------------- Data stores ----------------
 database "D1  Users" as D1
-database "D2  Labs" as D2
-database "D3  PCs" as D3
-database "D4  State Transitions" as D4
-database "D5  Master Timetable" as D5
-database "D6  Slot Cancellations" as D6
-database "D7  Damage Reports" as D7
-database "M1  Live PC State\n(in-memory)" as M1
+database "D2  PCs" as D2
+database "D3  Labs & Timetable" as D3
+database "D4  Damage Reports" as D4
 
-' ---------------- 1.0 Authenticate User ----------------
-Student <--> P1 : credentials / auth token
-Professor <--> P1 : credentials / auth token
-Admin <--> P1 : credentials / auth token
-P1 <-- D1 : user record
+Student --> P1 : login details
+Professor --> P1 : login details
+Admin --> P1 : login details
+D1 --> P1 : user record
+P1 --> P3 : verified user
 
-' ---------------- 7.0 Search Software ----------------
-Student <--> P7 : software query /\nsearch results
-P7 <-- D3 : installed software
-P7 <-- D2 : lab names
+Agent --> P2 : PC status
+P2 --> Agent : rejection notice
+P2 --> D2 : PC state & software
 
-' ---------------- 6.0 Manage Damage Reports & Maintenance ----------------
+D2 --> P3 : PC states
+D3 --> P3 : lab hours & timetable
+P3 --> Student : live lab status
+P3 --> Professor : live lab status
+P3 --> Admin : live lab status
+
+Student --> P4 : software search
+D2 --> P4 : installed software
+P4 --> Student : search results
+
+Admin --> P5 : lab & PC details
+Professor --> P5 : slot cancellation
+P5 --> D3 : labs & timetable
+P5 --> D2 : new PC
+
 Student --> P6 : damage report
-Professor --> P6 : maintenance toggle
-Admin <--> P6 : report decision, maintenance\ntoggle / pending reports
-P6 <--> D7 : report + decision /\npending reports
-P6 --> P3 : maintenance\ncommand
-
-' ---------------- 5.0 Administer Labs, PCs & Timetable ----------------
-Admin --> P5 : lab & PC registration,\ntimetable entries
-Professor <--> P5 : slot cancellation /\nlab timetable
-P5 --> D2 : lab details
-P5 --> D3 : new PC record
-P5 <--> D5 : timetable slot / slots
-P5 --> D6 : cancellation
-
-' ---------------- 4.0 Publish Live Lab & PC Status ----------------
-P4 --> Student : live lab &\nPC status
-P4 --> Professor : live lab &\nPC status
-P4 --> Admin : live lab &\nPC status
-P4 <-- M1 : live PC states
-P4 <-- D2 : operating hours
-P4 <-- D5 : today's slots
-P4 <-- D6 : today's cancellations
-
-' ---------------- 2.0 Ingest Agent Messages ----------------
-Agent <--> P2 : heartbeat, sleep notice,\nsoftware inventory /\nrejection notice
-P2 <--> D3 : installed software /\nregistered pc_ids
-P2 --> P3 : validated telemetry,\nsleep notice
-
-' ---------------- 3.0 Determine PC State ----------------
-P3 <--> M1 : live state + telemetry /\nprevious state, CPU samples
-P3 --> D4 : state transition
-P3 --> D3 : current state
-P3 --> P4 : state change\n+ telemetry
+Professor --> P6 : maintenance request
+Admin --> P6 : report decision
+P6 --> Admin : damage reports
+P6 <--> D4 : reports
+P6 --> D2 : maintenance flag
 @enduml
