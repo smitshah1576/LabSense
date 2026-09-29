@@ -1,0 +1,108 @@
+@startuml exp2-use-case
+' Experiment 2 - Use Case Diagram: LabSense (campus lab PC monitoring)
+title LabSense - Use Case Diagram
+
+left to right direction
+skinparam shadowing false
+skinparam actorStyle awesome
+skinparam packageStyle rectangle
+skinparam usecase {
+  BackgroundColor #FFFFFF
+  BorderColor #3A6EA5
+}
+skinparam package {
+  BorderColor #9AA5B1
+  FontColor #52606D
+}
+
+' ---------------- Primary actors (people) ----------------
+actor "Campus User" as User
+actor "Student" as Student
+actor "Professor" as Professor
+actor "Admin" as Admin
+
+' Mirrors the app's RBAC: every role is a Campus User, and an Admin can do
+' everything a Professor can (isProfessor() is true for ADMIN).
+Student -|> User
+Professor -|> User
+Admin -|> Professor
+
+' ---------------- Secondary / system actors ----------------
+actor "Lab PC Agent" as Agent <<system>>
+actor "systemd-logind" as Logind <<OS service>>
+actor "Heartbeat Timer" as Timer <<time>>
+
+rectangle "LabSense System" {
+
+  package "Telemetry (automatic)" {
+    usecase "Send Heartbeat\nTelemetry" as UC_HB
+    usecase "Notify Clean Suspend\n(GOING_TO_SLEEP)" as UC_Sleep
+    usecase "Report Software\nInventory" as UC_Inventory
+    usecase "Detect Stale PC\n(15 s grace period)" as UC_Stale
+    usecase "Update PC State" as UC_State
+  }
+
+  package "Lab Administration" {
+    usecase "Tag / Clear PC\nMaintenance" as UC_Maint
+    usecase "Cancel Timetable Slot\n(one date)" as UC_Cancel
+    usecase "Resolve Damage\nReport" as UC_Resolve
+    usecase "Manage Labs" as UC_Labs
+    usecase "Register / Remove\nWorkstation" as UC_PCs
+    usecase "Manage Master\nTimetable" as UC_Timetable
+  }
+
+  package "Access" {
+    usecase "Log In" as UC_Login
+    usecase "Register Account" as UC_Register
+  }
+
+  package "Monitoring & Discovery" {
+    usecase "View Labs &\nLive PC Status" as UC_View
+    usecase "Receive Live Updates\n(WebSocket)" as UC_Live
+    usecase "Filter PCs by State" as UC_Filter
+    usecase "View Lab Schedule\n& Lab State" as UC_Schedule
+    usecase "Search Installed\nSoftware" as UC_Search
+    usecase "Search Campus-wide" as UC_SearchAll
+    usecase "Search Within a Lab" as UC_SearchLab
+    usecase "Report Damaged PC" as UC_Report
+  }
+
+}
+
+' ---------------- Associations: people ----------------
+User --> UC_Login
+User --> UC_Register
+User --> UC_View
+User --> UC_Schedule
+User --> UC_Search
+User --> UC_Report
+
+Professor --> UC_Maint
+Professor --> UC_Cancel
+
+Admin --> UC_Resolve
+Admin --> UC_Labs
+Admin --> UC_PCs
+Admin --> UC_Timetable
+
+' ---------------- Associations: system actors (drawn on the right) ----------------
+UC_HB <-- Agent
+UC_Sleep <-- Agent
+UC_Inventory <-- Agent
+UC_Sleep <-- Logind
+UC_Stale <-- Timer
+
+' ---------------- Include / extend / generalization ----------------
+UC_View ..> UC_Login : <<include>>
+UC_View ..> UC_Live : <<include>>
+UC_Filter ..> UC_View : <<extend>>
+
+UC_SearchAll --|> UC_Search
+UC_SearchLab --|> UC_Search
+
+UC_Maint .[norank].> UC_Resolve : <<extend>>\n[report approved]
+
+UC_HB ..> UC_State : <<include>>
+UC_Sleep ..> UC_State : <<include>>
+UC_Stale ..> UC_State : <<include>>
+@enduml

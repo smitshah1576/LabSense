@@ -1,0 +1,69 @@
+@startuml exp4-sequence-clean-suspend
+' Experiment 4 - Sequence Diagram: how a clean suspend is told apart from a dead link
+title LabSense - Sequence Diagram: Clean Suspend (GOING_TO_SLEEP)
+
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+autonumber "<b>[0]"
+
+participant "systemd-logind\n(D-Bus)" as Logind
+box "Lab PC Agent" #F5F8FC
+  control ":AgentMain" as Main
+  participant ":LogindMonitor" as Mon
+  participant ":InhibitorLock" as Inh
+  participant ":HeartbeatClient" as Client
+end box
+boundary ":HeartbeatServer" as TCP
+control ":PCStateManager" as SM
+database "PostgreSQL" as DB
+actor "Dashboard" as UI
+
+== Agent start-up ==
+Main -> Inh : acquire()
+Inh -> Logind : Inhibit("sleep", "LabSense", ..., "delay")
+Logind --> Inh : lock file descriptor
+note over Logind, Inh : The OS now waits for LabSense\nbefore it may suspend.
+
+== User closes the lid / chooses Suspend ==
+Logind ->> Mon : PrepareForSleep(true)
+Mon -> Main : onPrepareSleep(true)
+activate Main
+Main -> Client : sendGoingToSleep()
+activate Client
+Client ->> TCP : GOING_TO_SLEEP(pc_id)
+Client -> Client : drain() - bytes are in\nthe kernel send buffer
+Client --> Main : sent
+deactivate Client
+Main -> Inh : release()
+Inh -> Logind : close(lock fd)
+deactivate Main
+Logind -> Logind : suspend the machine
+
+activate TCP
+TCP -> SM : handleGoingToSleep(pc_id)
+activate SM
+alt state is MAINTENANCE
+  SM --> TCP : ignored
+else otherwise
+  SM -> SM : state = AVAILABLE_SLEEP;\ncancel staleness timer
+  SM -> UI : pc_update {pc_id, AVAILABLE_SLEEP}\n(via ConnectionManager)
+  SM -> DB : INSERT state_transitions (-> AVAILABLE_SLEEP)
+  SM --> TCP : transition
+end
+deactivate SM
+deactivate TCP
+note over SM : No 15 s timeout applies: the dashboard shows\n"Asleep", not a PC that silently vanished.
+
+== Machine wakes up ==
+Logind ->> Mon : PrepareForSleep(false)
+Mon -> Main : onPrepareSleep(false)
+activate Main
+Main -> Inh : acquire()
+Inh -> Logind : Inhibit("sleep", ...)
+Main -> Client : close(); connect()
+Client ->> TCP : HEARTBEAT(...)
+deactivate Main
+TCP -> SM : handleHeartbeat(...)
+SM -> UI : pc_update {pc_id, IN_USE or AVAILABLE}
+@enduml
