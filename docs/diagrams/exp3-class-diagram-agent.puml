@@ -1,0 +1,122 @@
+@startuml exp3-class-diagram-agent
+' Experiment 3 - Class Diagram (part 2): the agent that runs on every lab PC
+title LabSense - Class Diagram (Lab PC Agent)
+
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #3A6EA5
+}
+hide empty members
+
+class AgentMain <<entry point>> {
+  - heartbeatTask : Task
+  - dbusTask : Task
+  - softwareScanTask : Task
+  + run() : void
+  - heartbeatLoop() : void
+  - dbusSupervisor() : void
+  - softwareScanLoop() : void
+  - onPrepareSleep(goingToSleep : Boolean) : void
+  - onPrepareShutdown(shuttingDown : Boolean) : void
+}
+
+class HeartbeatClient {
+  - host : String
+  - port : int
+  - pcId : String
+  - connected : Boolean
+  - backoff : float
+  - heartbeatCount : int
+  - rejected : Boolean
+  + connect() : void
+  + ensureConnected() : Boolean
+  + reconnectWithBackoff() : void
+  + sendHeartbeat(sessionActive, screenLocked, idleSeconds, cpuPercent) : Boolean
+  + sendGoingToSleep() : Boolean
+  + sendSoftwareReport(packages : List<String>) : Boolean
+  + close() : void
+  - readLoop() : void
+  - handleServerMessage(msg : Dict) : void
+}
+
+class LogindMonitor {
+  - bus : MessageBus
+  - onPrepareSleep : Callback
+  - onPrepareShutdown : Callback
+  - onLock : Callback
+  - onUnlock : Callback
+  + connectAndListen() : void
+  + getSessionHints() : Dict
+  + disconnect() : void
+}
+
+class InhibitorLock {
+  - fd : int
+  - bus : MessageBus
+  + held : Boolean
+  + acquire() : void
+  + release() : void
+  + close() : void
+}
+
+class InputIdleTracker {
+  - fds : Map<String, int>
+  - lastInput : float
+  + deviceCount : int
+  + start() : void
+  + stop() : void
+  + idleSeconds() : int
+}
+
+class Telemetry <<utility>> {
+  + {static} getCpuPercent() : float
+  + {static} getSessionActive(hints : Dict) : Boolean
+  + {static} getScreenLocked(hints : Dict) : Boolean
+  + {static} getIdleSeconds(hints : Dict, tracker : InputIdleTracker) : int
+}
+
+class SoftwareScanner <<utility>> {
+  + {static} scanDpkg() : List<String>
+  + {static} scanPip() : List<String>
+  + {static} scanAllSoftware() : List<String>
+}
+
+class Protocol <<utility>> {
+  + {static} encodeMessage(msg : Dict) : bytes
+  + {static} readMessage(reader : StreamReader) : Dict
+  + {static} createHeartbeat(...) : Dict
+  + {static} createGoingToSleep(pcId : String) : Dict
+  + {static} createSoftwareReport(pcId : String, packages : List<String>) : Dict
+}
+
+class AgentConfig <<configuration>> {
+  + SERVER_HOST : String
+  + SERVER_PORT : int = 9000
+  + PC_ID : String = hostname
+  + HEARTBEAT_INTERVAL : float = 5.0
+  + SOFTWARE_SCAN_INTERVAL : float = 300.0
+  + RECONNECT_DELAY : float = 5.0
+}
+
+AgentMain "1" *-- "1" HeartbeatClient
+AgentMain "1" *-- "1" LogindMonitor
+AgentMain "1" *-- "1" InhibitorLock
+AgentMain "1" *-- "1" InputIdleTracker
+
+LogindMonitor ..> AgentMain : <<calls back>>\nPrepareForSleep /\nPrepareForShutdown
+AgentMain ..> Telemetry : samples every 5 s
+AgentMain ..> SoftwareScanner : every 300 s
+Telemetry ..> InputIdleTracker : reads idle time
+Telemetry ..> LogindMonitor : session / lock hints
+HeartbeatClient ..> Protocol : frames messages
+HeartbeatClient ..> AgentConfig
+AgentMain ..> AgentConfig
+
+note bottom of HeartbeatClient
+  Connects to HeartbeatServer on the lab
+  server (TCP :9000). One connection per PC;
+  reconnects with exponential back-off (5 s -> 60 s).
+end note
+@enduml
