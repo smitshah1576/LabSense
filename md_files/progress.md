@@ -46,6 +46,8 @@ These are all in the agent, all Linux-specific, and all invisible from the dashb
 3. **Two `pc_id` conventions coexist.** Seed data uses `lab-a-pc-N`; `POST /admin/pcs` generates `<lab_id padded to 3><seq 2>` (e.g. `40801`). Both are currently live in the database. Pick one before the demo — an agent deployed against the wrong convention is now rejected loudly rather than silently, but it still won't report.
 4. **The GIN index on `installed_software` is not used by the search queries.** `EXISTS (… jsonb_array_elements_text … ILIKE …)` cannot use it, so both search endpoints are sequential scans. `architecture.md` §6 claims the index backs them. Either correct the claim or switch exact-name lookups to the `@>` containment operator, which can use the index.
 
+5. **Maintenance transitions are written twice.** `PUT /pcs/{id}/maintenance` and approving a damage report insert a `state_transitions` row after `set_maintenance()` has already inserted one via the transition callback, so the audit trail double-counts every maintenance change. Found during end-to-end testing.
+
 ## Recent Corrections
 - Windows Fast Startup / sleep-signal behavior (see above) — corrected after being documented incorrectly earlier.
 - Heartbeat staleness was listed as "Not Started" long after it was implemented; corrected above.
