@@ -28,7 +28,7 @@
 - `SETUP_UBUNTU.md` — all-in-one Ubuntu deployment.
 - `SETUP_WINDOWS_SERVER.md` — **backend/DB/frontend on Windows, agents on Ubuntu** (the current demo topology), including the network-reachability checks that distinguish a broken agent from blocked packets.
 - `TESTING.md` — ordered test procedure T1–T11. `agent/test_heartbeat.py` sends one raw protocol frame with no agent involved, which is the fastest way to tell a network problem from an agent problem.
-- `TESTBED.md` — single-machine E2E testbed (also runs in the Claude Code cloud environment): DB + backend + frontend, plus five client PCs on a Docker "lab LAN" — four scenario-driven mocks (`testbed/mock_pc.py`, driven with `testbed/pcctl`) and the real agent in a container. `testbed/testbed.sh test` runs an automated suite covering T2–T11.
+- `testbed/loadtest/` — scale testing against the real server (`README.md`), and the first baseline with the bottlenecks it found (`BASELINE.md`).
 
 ## Not Started
 - Nothing from the original list remains wholly unstarted. Heartbeat staleness, software discovery & search, Lab State and the damage-report flow all now have working implementations end-to-end (verified against a live Postgres + backend + agent chain). What remains is the correctness work in Known Gaps below, plus hardening.
@@ -47,7 +47,7 @@ These are all in the agent, all Linux-specific, and all invisible from the dashb
 3. **Two `pc_id` conventions coexist.** Seed data uses `lab-a-pc-N`; `POST /admin/pcs` generates `<lab_id padded to 3><seq 2>` (e.g. `40801`). Both are currently live in the database. Pick one before the demo — an agent deployed against the wrong convention is now rejected loudly rather than silently, but it still won't report.
 4. **The GIN index on `installed_software` is not used by the search queries.** `EXISTS (… jsonb_array_elements_text … ILIKE …)` cannot use it, so both search endpoints are sequential scans. `architecture.md` §6 claims the index backs them. Either correct the claim or switch exact-name lookups to the `@>` containment operator, which can use the index.
 
-5. **Maintenance transitions are written twice.** `PUT /pcs/{id}/maintenance` and approving a damage report insert a `state_transitions` row after `set_maintenance()` has already inserted one via the transition callback, so the audit trail double-counts every maintenance change. Found by the E2E testbed; tracked by two strict-`xfail` tests in `testbed/tests/test_server.py`.
+5. **Maintenance transitions are written twice.** `PUT /pcs/{id}/maintenance` and approving a damage report insert a `state_transitions` row after `set_maintenance()` has already inserted one via the transition callback, so the audit trail double-counts every maintenance change. Found by end-to-end testing in the cloud test environment.
 
 ## Recent Corrections
 - Windows Fast Startup / sleep-signal behavior (see above) — corrected after being documented incorrectly earlier.

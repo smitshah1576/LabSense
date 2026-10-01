@@ -1,8 +1,8 @@
 """LabSense scale test: many simulated lab PCs and live dashboards against one server.
 
-Point it at any LabSense server - the testbed (`testbed/testbed.sh scale` does
-that with a laptop-sized server), or the real Windows server from a Linux
-machine on the lab Wi-Fi. Needs Python 3.10+ and `pip install websockets`
+Point it at any LabSense server: the real Windows server from a Linux machine
+on the lab Wi-Fi, or the cloud test environment, whose `testbed.sh scale` runs
+it against a laptop-sized server. Needs Python 3.10+ and `pip install websockets`
 (plus psutil for --monitor-pid). Speaks the real agent wire protocol
 (labsense_agent.protocol).
 
@@ -28,7 +28,6 @@ reconnects them all (an access point rebooting, power returning to a lab);
 frozen tab); --dead-dashboards adds dashboards that go silent mid-run without
 closing, like a laptop that went to sleep with the page open (testbed only).
 
-Example (testbed): testbed/testbed.sh scale --steps 250,500,1000
 Example (real lab): python loadgen.py --server 10.234.237.199 --steps 100,250
 """
 
