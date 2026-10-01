@@ -207,16 +207,63 @@ longest dropouts, plus the 5 s between heartbeats, come within a few seconds of 
 
 ---
 
-## Scale testing
+## Scale testing — `testbed/testbed.sh scale`
 
-`testbed/testbed.sh scale` runs `testbed/loadtest/loadgen.py`: thousands of simulated PCs and a set of
-live dashboards, against the backend restarted as a **student-laptop-sized server** (one CPU core,
-no `--reload`, PostgreSQL on its own core with 1 GB). It reports heartbeat-to-dashboard latency,
-false offline flips, REST latency and server CPU/memory per step. The same load generator runs
-against the real Windows server from any Linux machine on the Wi-Fi.
+`testbed.sh scale` runs `testbed/loadtest/loadgen.py` against the backend restarted as a
+**student-laptop-sized server**. What the simulated fleet does, how to run the same tools against the
+real Windows server, and how to read a report: [`testbed/loadtest/README.md`](testbed/loadtest/README.md).
+Baseline results: [`testbed/loadtest/BASELINE.md`](testbed/loadtest/BASELINE.md).
 
-How to run it, in the testbed and in the lab: [`testbed/loadtest/README.md`](testbed/loadtest/README.md).
-Baseline results and the bottlenecks they point to: [`testbed/loadtest/BASELINE.md`](testbed/loadtest/BASELINE.md).
+```bash
+testbed/testbed.sh up                                   # if it isn't running
+testbed/testbed.sh scale                                # 100, 250, 500, 1000 PCs, 10 dashboards
+testbed/testbed.sh scale --steps 500,1000,2000,4000 --lab-size 60 --profile
+testbed/testbed.sh scale --steps 1000 --storm           # finish with every PC reconnecting at once
+testbed/testbed.sh scale --steps 1000 --dead-dashboards 1   # a dashboard laptop's lid is shut
+testbed/testbed.sh scale --steps 1000 --freeze-server 12    # the server stalls for 12 s
+```
+
+Every option after `scale` goes to `loadgen.py` (`--help` lists them). `scale` first turns the host
+into the laptop-sized server, and puts everything back afterwards:
+
+| Piece | During `scale` | Why |
+|---|---|---|
+| Backend | restarted exactly as `SETUP_WINDOWS_SERVER.md` runs it (no `--reload`, stock asyncio loop, `testbed/server.env`), pinned to **one CPU core** | the backend is one asyncio event loop, so one core is all it can use on any machine |
+| PostgreSQL | its own core, 1 GB RAM | Docker Desktop on a laptop |
+| Load generator | the remaining cores, run with `--monitor-pid`, `--db-container` (and `--profile` if asked) | so it never competes with the server it measures |
+
+It also runs `calibrate.py` on the server's core and records the score in the report. The dev
+backend (with `--reload`) comes back when the run ends or is interrupted, and the laptop-mode
+server's log is kept as `testbed/.run/backend-scale.log`. PostgreSQL gets all cores back but keeps
+its 1 GB memory cap until the next `testbed.sh down`.
+
+Knobs (environment variables):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SCALE_SERVER_CPUS` | `0` | cores for the backend (`taskset` list) |
+| `SCALE_SERVER_CPU_QUOTA` | unset | cap the backend at this fraction of its core (cgroup CPU quota) to stand in for a slower laptop: its `calibrate.py` score ÷ this host's, e.g. `0.5` |
+| `SCALE_DB_CPUS` / `SCALE_DB_MEMORY` | `1` / `1g` | PostgreSQL's cores and memory |
+| `SCALE_LOADGEN_CPUS` | `2`–last | cores for the load generator |
+
+`--dead-dashboards` (nftables) and `--freeze-server` (SIGSTOP) only work here, where the load
+generator runs as root on the server's machine.
+
+Before and after a code change: run `testbed/testbed.sh scale --steps <N,...> --profile --label before`,
+make the change (the dev backend reloads it), run it again with `--label after`, and compare the two
+`report.md` files. Repeated runs on the cloud host agreed on server CPU to within a few percent, but
+the host's own speed varied by up to ~10 % between runs. If the `calibrate.py` scores in the two
+reports differ, scale the results by them.
+
+**Over emulated Wi-Fi:** point the load generator at the emulator instead of the server.
+
+```bash
+testbed/testbed.sh wifi campus
+testbed/testbed.sh scale --steps 500 --server 172.28.0.2
+```
+
+The emulator is one Python process, so it becomes the bottleneck long before the server does. Use it
+for hundreds of PCs, not thousands.
 
 ---
 
