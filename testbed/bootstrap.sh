@@ -3,7 +3,8 @@
 # LabSense testbed — install host-side dependencies (idempotent).
 #
 #   backend/.venv          FastAPI backend + the E2E test tooling (pytest,
-#                          httpx, websockets are already in requirements.txt)
+#                          httpx, websockets come with requirements.txt) +
+#                          testbed/requirements.txt (psutil, py-spy for load tests)
 #   frontend/node_modules  React/Vite dashboard
 #
 # Safe to run repeatedly: pip and npm skip anything already satisfied. Used by
@@ -23,7 +24,7 @@ if [ ! -x "$ROOT/backend/.venv/bin/python" ]; then
 fi
 log "Installing backend requirements"
 "$ROOT/backend/.venv/bin/python" -m pip install --quiet --disable-pip-version-check \
-    -r "$ROOT/backend/requirements.txt"
+    -r "$ROOT/backend/requirements.txt" -r "$ROOT/testbed/requirements.txt"
 
 # --- Frontend ------------------------------------------------------------------
 # `npm install` rather than `npm ci`: it reuses an existing node_modules, so a

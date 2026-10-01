@@ -15,7 +15,7 @@ from websockets.exceptions import InvalidStatus
 from websockets.sync.client import connect as ws_connect
 
 from conftest import (
-    CPU_WINDOW, HEARTBEAT_TIMEOUT, IDLE_THRESHOLD, WS_URL,
+    CPU_WINDOW, HEARTBEAT_TIMEOUT, IDLE_THRESHOLD, LAN_ORIGIN, WS_URL,
     db_fetch, local_now, transitions, wait_until,
 )
 
@@ -46,10 +46,33 @@ def test_api_requires_a_token(api):
     assert api.get('/labs', as_=None).status_code == 401
 
 
+def _preflight(client, origin):
+    return client.options('/auth/login', headers={
+        'Origin': origin,
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'content-type',
+    })
+
+
+def test_dashboard_opened_from_the_lan_may_call_the_api(client):
+    """A teammate on the Wi-Fi opens http://<server LAN IP>:5173, so the browser
+    sends that Origin. Unless it is in LABSENSE_CORS_ORIGINS every API call
+    fails in the browser - the most likely "works on my machine" failure."""
+    resp = _preflight(client, LAN_ORIGIN)
+    assert resp.status_code == 200 and resp.headers.get('access-control-allow-origin') == LAN_ORIGIN, (
+        f'{LAN_ORIGIN} is not an allowed origin: add it to LABSENSE_CORS_ORIGINS '
+        f'(testbed/server.env here, backend\\.env on the Windows server)')
+
+
+def test_unlisted_origins_are_refused(client):
+    resp = _preflight(client, 'http://evil.example:5173')
+    assert resp.status_code == 400 and 'access-control-allow-origin' not in resp.headers
+
+
 def test_websocket_rejects_bad_tokens():
     for token in ('not-a-jwt', ''):
         with pytest.raises(InvalidStatus) as err:
-            with ws_connect(f'{WS_URL}?token={token}', open_timeout=5):
+            with ws_connect(f'{WS_URL}?token={token}', open_timeout=5, proxy=None):
                 pass
         assert err.value.response.status_code in (401, 403)
 

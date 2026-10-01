@@ -19,7 +19,10 @@
 #                        so the next `up` re-seeds from docker/init.sql
 #   restart [--wipe]     down + up
 #   status               health of every component + the fleet table
-#   logs <name> [-f]     backend | frontend | db | dockerd | lab-a-pc-N
+#   logs <name> [-f]     backend | frontend | db | dockerd | lab-wifi | lab-a-pc-N
+#   wifi <profile>       route the fleet through emulated Wi-Fi:
+#                        good | campus | poor | off   (see wifi_proxy.py)
+#   scale [options]      scale test against a laptop-sized server (loadtest/README.md)
 #   test [pytest args]   run the automated E2E suite (testbed/tests)
 #
 # Mock PCs are driven with testbed/pcctl (e.g. `testbed/pcctl 3 sleep`).
@@ -35,6 +38,17 @@ BACKEND_URL="http://localhost:8000"
 FRONTEND_URL="http://localhost:5173"
 TCP_PORT=9000
 AGENT_IMAGE="labsense-agent:testbed"
+
+# The server's address on the testbed's lab LAN (the gateway pinned in
+# compose.yml) - the counterpart of the Windows server's Wi-Fi IP. Agents and
+# LAN dashboards address the server by this IP, as they would in the lab.
+SERVER_LAN_IP="172.28.0.1"
+# The Wi-Fi emulator's address (compose.yml: lab-wifi) and the file that
+# remembers the active profile across `up`.
+WIFI_IP="172.28.0.2"
+WIFI_STATE="$RUN/wifi"
+# Stand-in for backend\.env on the Windows server (same variables, same syntax).
+SERVER_ENV="$TB/server.env"
 
 DB_COMPOSE=(docker compose -f "$ROOT/docker-compose.yml")
 FLEET_COMPOSE=(docker compose -f "$TB/compose.yml")
@@ -149,10 +163,17 @@ frontend_healthy() { curl -fsS -o /dev/null "$FRONTEND_URL" 2>/dev/null; }
 start_backend() {
     if backend_healthy; then ok "Backend already running on :8000 / :$TCP_PORT"; return; fi
     log "Starting backend (uvicorn :8000, TCP heartbeat server :$TCP_PORT)"
-    # --reload so backend edits take effect without re-running `up`; limited
-    # to app/ so the venv isn't watched.
+    # The Windows server's command (SETUP_WINDOWS_SERVER.md) plus:
+    #   --loop asyncio  Windows cannot install uvloop, so the server there runs
+    #                   stock asyncio. Left to itself uvicorn on Linux picks
+    #                   uvloop, which is markedly faster and would make every
+    #                   timing in the testbed optimistic.
+    #   --env-file      server.env, read exactly as Windows reads backend\.env.
+    #   --reload        developer convenience only; `scale` runs without it,
+    #                   as the Windows server does.
     start_proc backend "$ROOT/backend" \
-        .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app
+        .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --loop asyncio \
+        --env-file "$SERVER_ENV" --reload --reload-dir app
     wait_proc backend 60 backend_healthy || die "Backend failed to start — full log: $RUN/backend.log"
     ok "Backend ready: $BACKEND_URL (docs at /docs), TCP :$TCP_PORT"
 }
@@ -189,9 +210,37 @@ build_agent_image() {
     docker "${args[@]}" "$ROOT/agent" >/dev/null
 }
 
+wifi_profile() { cat "$WIFI_STATE" 2>/dev/null || echo off; }
+
+# Where the server is reachable without the Wi-Fi emulator: its LAN IP, as a
+# real agent's --server-host would be. Docker Desktop (macOS/Windows dev
+# machines) puts containers in a VM where that IP is not the host, so fall
+# back to Docker's host alias there.
+direct_server_host() {
+    if docker info --format '{{.OperatingSystem}}' 2>/dev/null | grep -qi 'docker desktop'; then
+        echo host.docker.internal
+    else
+        echo "$SERVER_LAN_IP"
+    fi
+}
+
+# Address the fleet connects to: an explicit LABSENSE_SERVER_HOST, else the
+# Wi-Fi emulator while it is on, else the server directly.
+fleet_server_host() {
+    if [ -n "${LABSENSE_SERVER_HOST:-}" ]; then
+        echo "$LABSENSE_SERVER_HOST"
+    elif [ "$(wifi_profile)" != off ]; then
+        echo "$WIFI_IP"
+    else
+        direct_server_host
+    fi
+}
+
 start_fleet() {
     build_agent_image
-    log "Starting client fleet (testbed/compose.yml)"
+    LABSENSE_SERVER_HOST="$(fleet_server_host)"
+    export LABSENSE_SERVER_HOST
+    log "Starting client fleet (testbed/compose.yml), server address $LABSENSE_SERVER_HOST"
     "${FLEET_COMPOSE[@]}" up -d --no-build --remove-orphans
     log "Waiting for every fleet PC to reach the backend"
     "$PY" "$TB/pcctl" wait --timeout 60 || die "Fleet not reporting — try: $TB/pcctl status"
@@ -199,6 +248,31 @@ start_fleet() {
 }
 
 # --- Commands --------------------------------------------------------------------
+
+cmd_wifi() {
+    local profile=${1:-}
+    case $profile in
+        good|campus|poor|off) ;;
+        *) die "usage: $0 wifi <good|campus|poor|off>   (current: $(wifi_profile))" ;;
+    esac
+    docker_up || die "Docker is not running - run: $0 up"
+    if [ "$profile" = off ]; then
+        "${FLEET_COMPOSE[@]}" --profile wifi rm -sf lab-wifi >/dev/null 2>&1 || true
+        rm -f "$WIFI_STATE"
+    else
+        log "Starting Wi-Fi emulator ($profile) at $WIFI_IP"
+        WIFI_UPSTREAM="$(direct_server_host)" WIFI_PROFILE="$profile" \
+            "${FLEET_COMPOSE[@]}" --profile wifi up -d lab-wifi
+        echo "$profile" >"$WIFI_STATE"
+    fi
+    # Recreates only the PCs whose server address changed.
+    start_fleet
+    ok "Wi-Fi: $profile (fleet -> $(fleet_server_host))"
+    if [ "$profile" != off ]; then
+        echo "  Dashboard over the emulated Wi-Fi:  http://$WIFI_IP:5173"
+        echo "  Emulator log:                        $0 logs lab-wifi"
+    fi
+}
 
 cmd_prepare() {
     ensure_docker
@@ -228,7 +302,7 @@ cmd_up() {
     cat <<EOF
 
   Dashboard   $FRONTEND_URL      admin@labsense.dev / prof@labsense.dev / student@labsense.dev
-                                          (password: password123)
+              http://$SERVER_LAN_IP:5173    (as a device on the lab LAN sees it; password: password123)
   API         $BACKEND_URL/docs
   Heartbeats  tcp://localhost:$TCP_PORT
 
@@ -248,8 +322,9 @@ cmd_down() {
     done
     if docker_up; then
         log "Stopping client fleet"
-        "${FLEET_COMPOSE[@]}" down --remove-orphans >/dev/null 2>&1 || true
+        "${FLEET_COMPOSE[@]}" --profile wifi down --remove-orphans >/dev/null 2>&1 || true
     fi
+    rm -f "$WIFI_STATE"
     stop_proc frontend
     stop_proc backend
     if docker_up; then
@@ -278,6 +353,11 @@ cmd_status() {
     fi
     if backend_healthy; then row backend "$(printf "$up")" "$BACKEND_URL, TCP :$TCP_PORT"; else row backend "$(printf "$down")" ""; fi
     if frontend_healthy; then row frontend "$(printf "$up")" "$FRONTEND_URL"; else row frontend "$(printf "$down")" ""; fi
+    if [ "$(wifi_profile)" = off ]; then
+        row wi-fi off "fleet talks to the server directly"
+    else
+        row wi-fi "$(wifi_profile)" "fleet goes through the emulator at $WIFI_IP"
+    fi
     echo
     "$PY" "$TB/pcctl" status || true
 }
@@ -289,10 +369,87 @@ cmd_logs() {
     case $name in
         backend|frontend|dockerd) tail -n 200 "${follow[@]}" "$RUN/$name.log" ;;
         db|database) docker logs --tail 200 "${follow[@]}" labsense-db ;;
-        lab-a-pc-*) docker logs --tail 200 "${follow[@]}" "$name" ;;
+        lab-a-pc-*|lab-wifi) docker logs --tail 200 "${follow[@]}" "$name" ;;
         [1-5]|pc-[1-5]) docker logs --tail 200 "${follow[@]}" "lab-a-pc-${name#pc-}" ;;
         *) die "unknown log source: $name" ;;
     esac
+}
+
+# --- Scale testing: a laptop-sized server ------------------------------------------
+#
+# The real server is an ordinary student laptop. The backend is one asyncio
+# event loop, so what limits it is a single core; PostgreSQL is the only other
+# busy process. The profile gives each its own core and gives the load
+# generator the rest, so simulated PCs never steal the server's CPU.
+#   SCALE_SERVER_CPUS        core(s) for the backend            (default 0)
+#   SCALE_DB_CPUS            core(s) for PostgreSQL             (default 1)
+#   SCALE_DB_MEMORY          PostgreSQL memory cap              (default 1g)
+#   SCALE_LOADGEN_CPUS       cores for the load generator       (default 2-<last>)
+#   SCALE_SERVER_CPU_QUOTA   cap the backend at this fraction of its core, to
+#                            emulate a slower laptop (e.g. 0.6): the laptop's
+#                            loadtest/calibrate.py score / this host's score
+
+CGROUP_NAME="labsense-server"
+
+limit_cpu() {
+    local pid=$1 cores=$2 period=10000 quota
+    quota=$(awk -v c="$cores" -v p="$period" 'BEGIN { printf "%d", c * p }')
+    if [ -w /sys/fs/cgroup/cpu ]; then                       # cgroup v1
+        local cg=/sys/fs/cgroup/cpu/$CGROUP_NAME
+        mkdir -p "$cg" && echo "$period" >"$cg/cpu.cfs_period_us" \
+            && echo "$quota" >"$cg/cpu.cfs_quota_us" && echo "$pid" >"$cg/cgroup.procs" && return 0
+    elif [ -f /sys/fs/cgroup/cgroup.controllers ]; then     # cgroup v2
+        local cg=/sys/fs/cgroup/$CGROUP_NAME
+        mkdir -p "$cg" && echo "$quota $period" >"$cg/cpu.max" \
+            && echo "$pid" >"$cg/cgroup.procs" && return 0
+    fi
+    warn "Could not cap the backend's CPU (no writable cgroup); continuing without a cap"
+    return 0
+}
+
+restore_after_scale() {
+    trap - EXIT INT TERM
+    log "Restoring the development backend (laptop-mode server log kept as $RUN/backend-scale.log)"
+    cp "$RUN/backend.log" "$RUN/backend-scale.log" 2>/dev/null || true
+    stop_proc backend
+    rmdir "/sys/fs/cgroup/cpu/$CGROUP_NAME" 2>/dev/null || rmdir "/sys/fs/cgroup/$CGROUP_NAME" 2>/dev/null || true
+    docker update --cpuset-cpus "0-$(($(nproc) - 1))" labsense-db >/dev/null 2>&1 || true
+    start_backend
+}
+
+cmd_scale() {
+    local ncpu server_cpus db_cpus gen_cpus quota db_mem pid score note status=0
+    ncpu=$(nproc)
+    server_cpus=${SCALE_SERVER_CPUS:-0}
+    db_cpus=${SCALE_DB_CPUS:-1}
+    gen_cpus=${SCALE_LOADGEN_CPUS:-2-$((ncpu - 1))}
+    quota=${SCALE_SERVER_CPU_QUOTA:-}
+    db_mem=${SCALE_DB_MEMORY:-1g}
+    [ "$ncpu" -ge 4 ] || warn "Only $ncpu CPUs: server and load generator will share cores, so results will be pessimistic"
+    backend_healthy && db_ready || die "Testbed is not running - run: $0 up"
+
+    log "Calibrating this host's CPU (loadtest/calibrate.py on CPU $server_cpus)"
+    score=$(cd "$ROOT" && taskset -c "$server_cpus" "$PY" "$TB/loadtest/calibrate.py" 2>/dev/null \
+        | grep -oE '[0-9,]+ heartbeats/s' | head -1 || true)
+    score=${score:-unknown}
+    ok "Calibration score: $score"
+
+    log "Laptop profile: backend on CPU $server_cpus${quota:+ capped at $quota of a core}, PostgreSQL on CPU $db_cpus ($db_mem), load generator on CPUs $gen_cpus"
+    trap restore_after_scale EXIT INT TERM
+    # Started exactly as SETUP_WINDOWS_SERVER.md does it - no --reload - with
+    # the stock asyncio loop the Windows server runs.
+    stop_proc backend
+    start_proc backend "$ROOT/backend" taskset -c "$server_cpus" \
+        .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --loop asyncio --env-file "$SERVER_ENV"
+    wait_proc backend 60 backend_healthy || die "Backend failed to start in laptop mode - see $RUN/backend.log"
+    pid=$(cat "$RUN/backend.pid")
+    if [ -n "$quota" ]; then limit_cpu "$pid" "$quota"; fi
+    docker update --cpuset-cpus "$db_cpus" --memory "$db_mem" --memory-swap "$db_mem" labsense-db >/dev/null
+
+    note="Laptop profile: backend pinned to CPU $server_cpus${quota:+ and capped at $quota of it}, started as on the Windows server (no --reload, stock asyncio loop); PostgreSQL on CPU $db_cpus with $db_mem; load generator on CPUs $gen_cpus. Host calibration score (loadtest/calibrate.py): $score."
+    taskset -c "$gen_cpus" "$PY" "$TB/loadtest/loadgen.py" --server "$SERVER_LAN_IP" \
+        --monitor-pid "$pid" --db-container labsense-db --profile-note "$note" "$@" || status=$?
+    return "$status"
 }
 
 cmd_test() {
@@ -307,6 +464,8 @@ case ${1:-} in
     restart) shift; cmd_down "$@"; cmd_up ;;
     status)  cmd_status ;;
     logs)    shift; cmd_logs "$@" ;;
+    wifi)    shift; cmd_wifi "$@" ;;
+    scale)   shift; cmd_scale "$@" ;;
     test)    shift; cmd_test "$@" ;;
     *)       awk 'NR > 2 && /^# =+$/ { exit } NR > 2 { sub(/^# ?/, ""); print }' "$0"; exit 1 ;;
 esac

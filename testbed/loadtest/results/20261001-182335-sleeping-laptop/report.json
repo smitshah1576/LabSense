@@ -1,0 +1,155 @@
+{
+  "label": "sleeping-laptop",
+  "when": "2026-10-01T18:26:45+00:00",
+  "config": {
+    "server": "172.28.0.1",
+    "tcp_port": 9000,
+    "api_port": 8000,
+    "steps": [
+      500,
+      1000
+    ],
+    "step_seconds": 60,
+    "warmup_seconds": 15,
+    "ramp_seconds": 10.0,
+    "connect_rate": 50.0,
+    "dashboards": 10,
+    "measured": 3,
+    "stalled_dashboards": 0,
+    "dead_dashboards": 1,
+    "packages": 1500,
+    "software_interval": 300.0,
+    "churn_minutes": 30.0,
+    "lab_size": 60,
+    "storm": false,
+    "freeze_server": 0,
+    "stop_on_fail": false,
+    "cleanup": false,
+    "monitor_pid": 32061,
+    "db_container": "labsense-db",
+    "profile": false,
+    "slo_p95_ms": 1000,
+    "slo_p99_ms": 3000,
+    "slo_rest_ms": 1000,
+    "slo_cpu_pct": 80,
+    "admin_email": "admin@labsense.dev",
+    "student_email": "student@labsense.dev",
+    "seed": 1,
+    "label": "sleeping-laptop",
+    "profile_note": "Laptop profile: backend pinned to CPU 0, started as on the Windows server (no --reload, stock asyncio loop); PostgreSQL on CPU 1 with 1g; load generator on CPUs 2-3. Host calibration score (loadtest/calibrate.py): 41,510 heartbeats/s.",
+    "out": "/home/user/LabSense/testbed/loadtest/results"
+  },
+  "environment": {
+    "loadgen_python": "3.11.15",
+    "loadgen_platform": "Linux-6.18.44-fc-v50-x86_64-with-glibc2.39",
+    "loadgen_cpus": 4,
+    "server": "172.28.0.1",
+    "loadgen_cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz"
+  },
+  "steps": [
+    {
+      "pcs": 500,
+      "heartbeats_per_s": 100.0,
+      "dashboard_msgs_per_s": 1013.2,
+      "latency_ms": {
+        "p50": 1.3,
+        "p95": 2.5,
+        "p99": 6.3,
+        "max": 25.7
+      },
+      "delivered_ratio": 1.0,
+      "false_offline_flips": 0,
+      "pcs_flipped": 0,
+      "in_use_pcs_shown_available_by_rest": 0,
+      "rest_p95_ms": {
+        "health": 8.5,
+        "lab_pcs": 29.8,
+        "labs": 361.4
+      },
+      "rest_errors": 0,
+      "connect_errors": 0,
+      "send_errors": 0,
+      "rejected": 0,
+      "dashboard_errors": 0,
+      "stalled_dashboards_closed_by_server_after_s": [],
+      "loadgen_loop_lag_p95_ms": 1.9,
+      "server": {
+        "cpu_avg_pct": 8.0,
+        "cpu_p95_pct": 13.0,
+        "cpu_max_pct": 16.0,
+        "rss_max_mb": 134.7,
+        "samples": 59
+      },
+      "db": {
+        "cpu_avg_pct": 4.3,
+        "cpu_max_pct": 9.2,
+        "mem_max_mb": 366.7
+      },
+      "slo_failures": [],
+      "passed": true,
+      "while_connecting": {
+        "connect_rate_per_s": 50.0,
+        "false_offline_flips": 0,
+        "in_use_pcs_shown_available_by_rest": 0,
+        "latency_p99_ms": 22.5,
+        "latency_max_ms": 103.5,
+        "connect_errors": 0
+      }
+    },
+    {
+      "pcs": 1000,
+      "heartbeats_per_s": 200.1,
+      "dashboard_msgs_per_s": 818.8,
+      "latency_ms": {
+        "p50": 1.0,
+        "p95": 2.4,
+        "p99": 6.3,
+        "max": 130.4
+      },
+      "delivered_ratio": 0.371,
+      "false_offline_flips": 0,
+      "pcs_flipped": 0,
+      "in_use_pcs_shown_available_by_rest": 24,
+      "rest_p95_ms": {
+        "health": 9.2,
+        "lab_pcs": 29.3,
+        "labs": 245.6
+      },
+      "rest_errors": 0,
+      "connect_errors": 0,
+      "send_errors": 0,
+      "rejected": 0,
+      "dashboard_errors": 0,
+      "stalled_dashboards_closed_by_server_after_s": [],
+      "loadgen_loop_lag_p95_ms": 1.4,
+      "server": {
+        "cpu_avg_pct": 7.3,
+        "cpu_p95_pct": 13.9,
+        "cpu_max_pct": 19.0,
+        "rss_max_mb": 206.3,
+        "samples": 59
+      },
+      "db": {
+        "cpu_avg_pct": 8.4,
+        "cpu_max_pct": 25.3,
+        "mem_max_mb": 368.2
+      },
+      "slo_failures": [
+        "only 37% of heartbeats reached dashboards",
+        "24 in-use PCs shown as Available by the REST API"
+      ],
+      "passed": false,
+      "while_connecting": {
+        "connect_rate_per_s": 50.0,
+        "false_offline_flips": 0,
+        "in_use_pcs_shown_available_by_rest": 0,
+        "latency_p99_ms": 12.9,
+        "latency_max_ms": 175.7,
+        "connect_errors": 0
+      }
+    }
+  ],
+  "storm": null,
+  "freeze": null,
+  "max_passing_pcs": 500
+}
