@@ -192,7 +192,15 @@ will be opened from, including the server's LAN IP if teammates will browse to i
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-`--host 0.0.0.0` is not optional here: the default binds localhost only. Verify:
+`--host 0.0.0.0` is not optional here: the default binds localhost only.
+
+Don't add `--reload` or `--workers` to this command on the server:
+
+- With either, uvicorn on Windows switches to the selector event loop, which can't handle more than
+  512 sockets (about 500 lab PCs and dashboards combined).
+- `--workers` would also split the in-memory PC state between processes.
+
+Verify:
 
 - <http://localhost:8000/health> → `{"status":"ok"}`
 - <http://localhost:8000/docs> → interactive API docs
@@ -220,6 +228,10 @@ Open <http://localhost:5173>. The dashboard defaults to talking to port 8000 on 
 it, so browsing from another machine via `http://10.234.237.199:5173` works without configuration —
 provided that origin is in `LABSENSE_CORS_ORIGINS`. To point the UI at a backend on a *different*
 host, copy `frontend/.env.example` to `frontend/.env` and set `VITE_API_URL` / `VITE_WS_URL`.
+
+Browse by IP address, not by the laptop's name. Vite's dev server answers `http://MYLAPTOP:5173`
+with 403 "Blocked request" because it doesn't recognise the host name, while IP addresses and
+`localhost` always work.
 
 Seed logins (all `password123`): `admin@labsense.dev`, `prof@labsense.dev`, `student@labsense.dev`.
 

@@ -1,0 +1,110 @@
+{
+  "label": "server-freeze",
+  "when": "2026-10-01T18:37:10+00:00",
+  "config": {
+    "server": "172.28.0.1",
+    "tcp_port": 9000,
+    "api_port": 8000,
+    "steps": [
+      1000
+    ],
+    "step_seconds": 60,
+    "warmup_seconds": 15,
+    "ramp_seconds": 10.0,
+    "connect_rate": 50.0,
+    "dashboards": 10,
+    "measured": 3,
+    "stalled_dashboards": 0,
+    "dead_dashboards": 0,
+    "packages": 1500,
+    "software_interval": 300.0,
+    "churn_minutes": 30.0,
+    "lab_size": 60,
+    "storm": false,
+    "freeze_server": 12.0,
+    "stop_on_fail": false,
+    "cleanup": false,
+    "monitor_pid": 3000,
+    "db_container": "labsense-db",
+    "profile": false,
+    "slo_p95_ms": 1000,
+    "slo_p99_ms": 3000,
+    "slo_rest_ms": 1000,
+    "slo_cpu_pct": 80,
+    "admin_email": "admin@labsense.dev",
+    "student_email": "student@labsense.dev",
+    "seed": 1,
+    "label": "server-freeze",
+    "profile_note": "Laptop profile: backend pinned to CPU 0, started as on the Windows server (no --reload, stock asyncio loop); PostgreSQL on CPU 1 with 1g; load generator on CPUs 2-3. Host calibration score (loadtest/calibrate.py): 37,588 heartbeats/s.",
+    "out": "/home/user/LabSense/testbed/loadtest/results"
+  },
+  "environment": {
+    "loadgen_python": "3.11.15",
+    "loadgen_platform": "Linux-6.18.44-fc-v50-x86_64-with-glibc2.39",
+    "loadgen_cpus": 4,
+    "server": "172.28.0.1",
+    "loadgen_cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz"
+  },
+  "steps": [
+    {
+      "pcs": 1000,
+      "heartbeats_per_s": 200.0,
+      "dashboard_msgs_per_s": 2015.2,
+      "latency_ms": {
+        "p50": 1.1,
+        "p95": 2.7,
+        "p99": 6.3,
+        "max": 141.1
+      },
+      "delivered_ratio": 1.0,
+      "false_offline_flips": 0,
+      "pcs_flipped": 0,
+      "in_use_pcs_shown_available_by_rest": 0,
+      "rest_p95_ms": {
+        "health": 6.2,
+        "lab_pcs": 39.1,
+        "labs": 242.5
+      },
+      "rest_errors": 0,
+      "connect_errors": 0,
+      "send_errors": 0,
+      "rejected": 0,
+      "dashboard_errors": 0,
+      "stalled_dashboards_closed_by_server_after_s": [],
+      "loadgen_loop_lag_p95_ms": 1.7,
+      "server": {
+        "cpu_avg_pct": 11.9,
+        "cpu_p95_pct": 17.9,
+        "cpu_max_pct": 20.0,
+        "rss_max_mb": 198.5,
+        "samples": 60
+      },
+      "db": {
+        "cpu_avg_pct": 2.8,
+        "cpu_max_pct": 15.7,
+        "mem_max_mb": 388.2
+      },
+      "slo_failures": [],
+      "passed": true,
+      "while_connecting": {
+        "connect_rate_per_s": 50.0,
+        "false_offline_flips": 0,
+        "in_use_pcs_shown_available_by_rest": 0,
+        "latency_p99_ms": 28.9,
+        "latency_max_ms": 209.4,
+        "connect_errors": 0
+      }
+    }
+  ],
+  "storm": null,
+  "freeze": {
+    "pcs": 1000,
+    "seconds": 12.0,
+    "false_offline_flips": 222,
+    "pcs_flipped": 222,
+    "in_use_pcs_shown_available_by_rest": 0,
+    "latency_max_ms": 12607.3,
+    "passed": false
+  },
+  "max_passing_pcs": 1000
+}

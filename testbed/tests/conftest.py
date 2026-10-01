@@ -51,6 +51,8 @@ IDLE_THRESHOLD = int(os.environ.get('LABSENSE_IDLE_THRESHOLD_SECONDS', '300'))
 CPU_THRESHOLD = float(os.environ.get('LABSENSE_CPU_THRESHOLD_PERCENT', '5.0'))
 CPU_WINDOW = int(os.environ.get('LABSENSE_CPU_WINDOW_HEARTBEATS', '3'))
 TIMEZONE = os.environ.get('LABSENSE_TIMEZONE', 'Asia/Kolkata')
+# The dashboard as a teammate on the Wi-Fi opens it: http://<server LAN IP>:5173.
+LAN_ORIGIN = os.environ.get('LABSENSE_LAN_ORIGIN', 'http://172.28.0.1:5173')
 
 PASSWORD = 'password123'
 USERS = {
@@ -291,7 +293,8 @@ def ws_for(tokens):
     """Factory for dashboard WebSocket listeners, closed after the test."""
     with contextlib.ExitStack() as stack:
         def factory(role: str = 'admin') -> WsListener:
-            ws = stack.enter_context(ws_connect(f'{WS_URL}?token={tokens[role]}', open_timeout=5))
+            ws = stack.enter_context(ws_connect(f'{WS_URL}?token={tokens[role]}', open_timeout=5,
+                                                proxy=None))
             return WsListener(ws)
 
         yield factory

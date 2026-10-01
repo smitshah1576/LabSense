@@ -1,0 +1,5 @@
+# Testbed-only tools, installed into backend/.venv by testbed/bootstrap.sh on
+# top of backend/requirements.txt (which already provides pytest, httpx and
+# websockets). Not needed to run LabSense itself.
+psutil>=6.0     # loadtest: server CPU/memory sampling (loadgen --monitor-pid, server_monitor.py)
+py-spy>=0.4     # loadtest: sampling profiler for finding hot spots in the backend

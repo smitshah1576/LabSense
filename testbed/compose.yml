@@ -28,6 +28,9 @@ x-mock-pc: &mock-pc
   restart: unless-stopped
 
 x-server-env: &server-env
+  # testbed.sh sets this to the server's LAN IP (172.28.0.1), or to the Wi-Fi
+  # emulator (172.28.0.2) while `testbed.sh wifi` is on. The fallback suits
+  # running this file by hand on Docker Desktop.
   LABSENSE_SERVER_HOST: ${LABSENSE_SERVER_HOST:-host.docker.internal}
   LABSENSE_SERVER_PORT: ${LABSENSE_SERVER_PORT:-9000}
 
@@ -84,6 +87,23 @@ services:
     networks:
       lab-lan: { ipv4_address: 172.28.0.14 }
 
+  # Wi-Fi emulator: stands where the access point would be. Off unless
+  # `testbed.sh wifi <profile>` is used, which also points the fleet at it.
+  lab-wifi:
+    image: python:3.11-slim
+    container_name: lab-wifi
+    hostname: lab-wifi
+    profiles: ["wifi"]
+    command: ["python", "-u", "/testbed/wifi_proxy.py"]
+    environment:
+      WIFI_PROFILE: ${WIFI_PROFILE:-campus}
+      WIFI_UPSTREAM: ${WIFI_UPSTREAM:-172.28.0.1}
+    volumes:
+      - ./wifi_proxy.py:/testbed/wifi_proxy.py:ro
+    restart: unless-stopped
+    networks:
+      lab-lan: { ipv4_address: 172.28.0.2 }
+
   lab-a-pc-5:
     build: ../agent
     image: labsense-agent:testbed
@@ -107,3 +127,6 @@ networks:
     ipam:
       config:
         - subnet: 172.28.0.0/24
+          # The host's address on this network: the "server's Wi-Fi IP" that
+          # agents and LAN dashboards use (SERVER_LAN_IP in testbed.sh).
+          gateway: 172.28.0.1
