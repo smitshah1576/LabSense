@@ -56,5 +56,14 @@ Thumbs.db
 *.log
 pgdata/
 
-# Testbed runtime state (pid files, logs)
-testbed/.run/
+# Cloud test environment: the single-machine testbed with Docker mock lab
+# PCs, a Wi-Fi emulator and the E2E suite. Not needed to set up or run LabSense, so it
+# is kept out of the repository. Its last committed version is 34e8a96; to
+# get it back in a checkout (as untracked, ignored files):
+#   git restore --source=34e8a96 -- TESTBED.md agent/Dockerfile agent/.dockerignore testbed ':!testbed/loadtest'
+TESTBED.md
+agent/Dockerfile
+agent/.dockerignore
+testbed/*
+# ...except the scale-test tools, which also run against the real server.
+!testbed/loadtest/

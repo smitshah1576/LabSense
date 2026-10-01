@@ -4,6 +4,12 @@ What a student-laptop-sized LabSense server handled in the testbed **before any 
 what to change first. Every number links to a run in `results/`. To check a change, re-run the
 same command and compare the reports.
 
+The runs used the cloud test environment's `testbed/testbed.sh scale`, which isn't part of this
+repository (the comment in `.gitignore` says how to restore it). It restarts the backend as a
+laptop-sized server, as described under Setup, then runs `loadgen.py` with the arguments shown.
+Against a real server, run `loadgen.py --server <server IP>` with the same arguments, except
+`--profile`, `--dead-dashboards` and `--freeze-server`, which need the server's own machine.
+
 ## Setup
 
 - **Server.** The backend is pinned to one core of an Intel Xeon @ 2.1 GHz (cloud VM). It is started
@@ -123,8 +129,8 @@ for something every PC has, such as `firefox`, moves every inventory through Pyt
 heartbeats meanwhile: 5.4 s end to end at 6,000 PCs, against 4.6 s for the SQL alone. The per-lab
 search works the same way within a lab.
 
-The E2E suite's search test waits 5 s, so it times out when thousands of load-test PCs are left in
-the database. Load-test runs now delete their labs.
+Leftover load-test PCs slow search down for everyone, which is why `loadgen.py` deletes its labs
+when it finishes.
 
 **Directions:**
 

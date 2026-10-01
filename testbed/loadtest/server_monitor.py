@@ -1,7 +1,7 @@
 """Sample the LabSense server process's CPU and memory during a load test.
 
-Run it on the machine the server runs on - the Windows laptop in the lab, or
-the testbed host (testbed.sh scale does that for you through loadgen.py).
+Run it on the machine the server runs on: the Windows laptop in the lab.
+(loadgen.py --monitor-pid does the same when it runs on the server's machine.)
 CPU is reported as a percentage of ONE core: the backend is a single asyncio
 event loop, so ~100 % means it is saturated no matter how many cores the
 machine has.

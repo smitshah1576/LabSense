@@ -7,10 +7,6 @@ which is otherwise the hardest thing to distinguish in this system.
 Throughout, `10.234.237.199` is the Windows server's LAN IP — substitute your own (Phase 0.1 of
 [`SETUP_WINDOWS_SERVER.md`](SETUP_WINDOWS_SERVER.md)).
 
-**No lab hardware to hand?** [`TESTBED.md`](TESTBED.md) runs the server plus five client PCs (four
-scenario-driven mocks and the real agent) in Docker on one machine, with an automated suite
-(`testbed/testbed.sh test`) covering T2–T11. It maps each test below to its testbed equivalent.
-
 ---
 
 ## T1 — LAN reachability
