@@ -64,9 +64,10 @@ class InhibitorLock:
         """Acquire the inhibitor lock.
 
         Connects to the system D-Bus (if not already connected) and calls
-        ``org.freedesktop.login1.Manager.Inhibit("sleep", ...)``.  The
-        returned Unix file descriptor represents the lock — closing it
-        releases the lock.
+        ``org.freedesktop.login1.Manager.Inhibit("sleep:shutdown", ...)``.
+        The returned Unix file descriptor represents the lock — closing it
+        releases the lock.  Shutdown is covered as well as sleep so that
+        ``SHUTTING_DOWN`` gets the same flush guarantee as ``GOING_TO_SLEEP``.
         """
         if self._fd is not None:
             logger.warning('Inhibitor lock already held (fd=%d), skipping acquire', self._fd)
@@ -84,10 +85,10 @@ class InhibitorLock:
                     member='Inhibit',
                     signature='ssss',
                     body=[
-                        'sleep',                                       # what
-                        'LabSense Agent',                              # who
-                        'Need to send sleep notification to server',   # why
-                        'delay',                                       # mode
+                        'sleep:shutdown',                                # what
+                        'LabSense Agent',                                # who
+                        'Need to notify server before sleep/shutdown',   # why
+                        'delay',                                         # mode
                     ],
                 )
             )

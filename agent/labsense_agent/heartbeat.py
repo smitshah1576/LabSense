@@ -2,7 +2,7 @@
 
 Maintains a persistent TCP connection to the LabSense backend server and
 provides methods for sending protocol messages (HEARTBEAT, GOING_TO_SLEEP,
-SOFTWARE_REPORT).
+SHUTTING_DOWN, SOFTWARE_REPORT).
 
 Connection management:
 - Uses ``asyncio.open_connection()`` (non-blocking).
@@ -25,6 +25,7 @@ from . import config
 from .protocol import (
     create_going_to_sleep,
     create_heartbeat,
+    create_shutting_down,
     create_software_report,
     encode_message,
     read_message,
@@ -260,6 +261,20 @@ class HeartbeatClient:
             logger.error('Failed to send GOING_TO_SLEEP: %s', exc)
             self._connected = False
             return False
+
+    async def send_shutting_down(self) -> bool:
+        """Send SHUTTING_DOWN and flush the write buffer.
+
+        Called from the ``PrepareForShutdown`` callback.  Kept distinct from
+        GOING_TO_SLEEP so the server shows a powered-off PC as Available
+        rather than Asleep.
+
+        Returns ``True`` on success.
+        """
+        ok = await self._send(create_shutting_down(self._pc_id))
+        if ok:
+            logger.info('SHUTTING_DOWN sent and flushed')
+        return ok
 
     async def send_software_report(self, packages: List[str]) -> bool:
         """Build and send a SOFTWARE_REPORT message.

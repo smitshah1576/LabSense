@@ -1,0 +1,31 @@
+%%{init: {"sequence": {"messageFontSize": 24, "actorFontSize": 24, "noteFontSize": 22, "messageFontFamily": "Noto Sans CJK SC", "actorFontFamily": "Noto Sans CJK SC", "noteFontFamily": "Noto Sans CJK SC", "boxTextMargin": 6, "actorMargin": 30, "width": 170, "height": 60}}}%%
+sequenceDiagram
+  autonumber
+  box rgb(238,242,255) On the lab PC
+    participant HC as Agent<br/>(HeartbeatClient)
+  end
+  box rgb(244,244,245) On the server
+    participant TS as TCP server
+    participant SM as State manager
+    participant DB as PostgreSQL
+    participant CM as WebSocket manager
+  end
+  box rgb(236,253,245) In the browser
+    participant BR as Dashboard
+  end
+  loop every ~5 seconds
+    HC->>TS: HEARTBEAT (session, lock, idle, CPU)
+    opt first frame on this connection
+      TS->>DB: Is this pc_id registered?
+      DB-->>TS: yes
+    end
+    TS->>SM: handle_heartbeat()
+    Note over SM: Work out the state,<br/>restart the 15 s timer
+    alt the state changed
+      SM->>DB: save to state_transitions
+      SM->>CM: broadcast the new state
+    end
+    TS->>CM: broadcast telemetry
+    CM-->>BR: pc_update over WebSocket
+    Note over BR: Card colour and<br/>numbers refresh
+  end

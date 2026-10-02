@@ -38,8 +38,8 @@ export const mergeLivePc = (pc, live) => {
     idle_seconds: pick(live, 'idle_seconds', pc.idle_seconds),
     last_heartbeat_at: (live && live.last_heartbeat_at) || pc.last_heartbeat_at,
   }
-  // REST returns null telemetry for PCs that have not reported since the
-  // backend started. Show that as "waiting", not as an idle PC at 0% CPU.
+  // Telemetry is null whenever no heartbeats are arriving: never reported,
+  // stale, asleep or shut down. Show that as "no data", not as 0% CPU.
   merged.has_telemetry = typeof merged.cpu_percent === 'number'
   return merged
 }

@@ -65,7 +65,36 @@ async def lifespan(app: FastAPI):
             logger.error(f"Error in transition callback for PC {pc_id}: {e}")
             
     state_manager.set_transition_callback(on_transition)
-    
+
+    async def on_telemetry_cleared(pc_id: str, state):
+        # A PC went stale, to sleep or shut down: blank its readings in every
+        # browser so old numbers aren't shown under the new state.
+        await ws_manager.broadcast_pc_heartbeat(
+            pc_id=pc_id,
+            state=state.value,
+            session_active=None,
+            screen_locked=None,
+            idle_seconds=None,
+            cpu_percent=None,
+        )
+
+    state_manager.set_telemetry_cleared_callback(on_telemetry_cleared)
+
+    # Maintenance is manual-only, so it is restored from the DB before any
+    # agent can connect. is_maintenance is the source of truth — only the
+    # explicit toggles write it — and current_state is brought back in line.
+    async with pool.acquire() as conn:
+        maintenance_rows = await conn.fetch(
+            """
+            UPDATE pcs SET current_state = 'MAINTENANCE'
+            WHERE is_maintenance
+            RETURNING pc_id
+            """
+        )
+    await state_manager.restore_maintenance([row["pc_id"] for row in maintenance_rows])
+    if maintenance_rows:
+        logger.info(f"Restored maintenance for {len(maintenance_rows)} PC(s)")
+
     # 4. Start TCP Server
     tcp_server = await start_tcp_server(
         state_manager=state_manager,

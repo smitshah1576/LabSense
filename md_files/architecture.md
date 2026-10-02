@@ -26,7 +26,7 @@ One process, one thread, one event loop, two long-running `asyncio` Tasks:
 
 This replaces an earlier three-OS-thread design (one thread each for the socket client, the polling loop, and the OS power-message pump) that made sense for blocking libraries like `dbus-python`, but is unnecessary once every library in use is asyncio-native.
 
-**Suspend guarantee:** the agent takes a **systemd-logind inhibitor lock** (`Inhibit("sleep", ...)`) at startup. On `PrepareForSleep(true)`, it writes `GOING_TO_SLEEP`, awaits the flush, then releases the lock — the OS cannot proceed to suspend until the lock is released, so there's no race between the network write and the OS tearing down the interface. (An earlier version of this design tried to win that race by using a synchronous call instead of an async one; that doesn't actually provide a guarantee — the inhibitor lock is what does.)
+**Suspend guarantee:** the agent takes a **systemd-logind inhibitor lock** (`Inhibit("sleep:shutdown", ...)`, so it delays shutdown as well) at startup. On `PrepareForSleep(true)`, it writes `GOING_TO_SLEEP`, awaits the flush, then releases the lock — the OS cannot proceed to suspend until the lock is released, so there's no race between the network write and the OS tearing down the interface. (An earlier version of this design tried to win that race by using a synchronous call instead of an async one; that doesn't actually provide a guarantee — the inhibitor lock is what does.)
 
 **Known risk — don't block the loop:** cooperative scheduling means nothing else runs until the current coroutine hits an `await`. The natural way to write the CPU check, `psutil.cpu_percent(interval=1)`, blocks the entire loop for a full second on every call — including the D-Bus task, which stops listening for the sleep signal for that second. Use `psutil.cpu_percent(interval=None)` (compares against the last call instead of sleeping) or offload to `loop.run_in_executor()` if a blocking call is unavoidable. This has to be a deliberate line in the agent code, not the default first draft.
 
@@ -43,6 +43,7 @@ This replaces an earlier three-OS-thread design (one thread each for the socket 
   - idle time
   - CPU %
 - Special message: `GOING_TO_SLEEP`, sent pre-suspend for graceful disconnection (see above).
+- Special message: `SHUTTING_DOWN`, sent on `PrepareForShutdown` before a clean power-off or reboot. It maps straight to **Available** rather than Available/Sleep, without waiting for the 15-second grace period.
 - **Open question — not yet decided:** the protocol as currently scoped has no described authentication or integrity check on heartbeat payloads. On a shared lab LAN this is a plausible viva question ("what stops another machine from spoofing a heartbeat?"). Worth a deliberate decision — even "out of scope, here's why" is a defensible answer — rather than leaving it unaddressed.
 
 ## 3. Backend

@@ -132,7 +132,8 @@ sudo systemctl stop labsense-agent
 
 **Pass:** the card flips to **Available** roughly 15 s later (not instantly, not never), the backend
 logs `heartbeat stale after 15s`, and exactly one new row appears in `state_transitions` — a single
-transition, not a flapping sequence.
+transition, not a flapping sequence. At the same moment the CPU / idle / session / screen readings
+are replaced by **"Not reporting — off or disconnected"**; old numbers must not stay on the card.
 
 Restart the agent and confirm the card recovers.
 
@@ -164,6 +165,22 @@ down. The likely cause is the sleep inhibitor lock never actually being held —
 `agent/labsense_agent/inhibitor.py`. **Check this before the demo**, since the suspend guarantee is
 one of the architecture's headline claims.
 
+In both cases the readings are replaced by **"No readings while asleep"** / **"Not reporting"**, and
+they return with the first heartbeat after wake.
+
+### T7b — clean shutdown
+
+```bash
+sudo systemctl poweroff      # or: sudo reboot
+```
+
+**Pass:** the card reads **Available** (not Available/Sleep) with **"Not reporting — off or
+disconnected"**, and the agent's journal from that boot ends with `SHUTTING_DOWN sent and flushed`.
+
+If the card only reaches Available after ~15 s, the message lost the race with the shutdown (same
+inhibitor caveat as above); the end state is still correct. If it reads **Available/Sleep**, the PC
+is running an agent from before `SHUTTING_DOWN` existed — redeploy it.
+
 ---
 
 ## T8 — Maintenance override
@@ -175,6 +192,9 @@ Tag a PC as Maintenance while its agent is still sending heartbeats.
 **Pass:** the state stays **MAINTENANCE** regardless of what the agent reports, and no automatic
 transitions are written. Telemetry (CPU, idle) still updates underneath. Clearing maintenance returns
 it to Available, and normal transitions resume.
+
+Then tag a PC again and **restart the backend**. **Pass:** the card still reads **MAINTENANCE** after
+the agent reconnects, and stays there until the tag is cleared by hand.
 
 Also confirm the permission split: a professor can tag/clear; a student cannot, and only sees the
 damage-report path.

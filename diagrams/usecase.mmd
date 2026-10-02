@@ -1,0 +1,38 @@
+flowchart LR
+  classDef actor fill:#FFFFFF,stroke:#18181B,stroke-width:2px,color:#18181B,font-weight:bold
+  classDef uc fill:#EEF2FF,stroke:#4F46E5,stroke-width:2px,color:#18181B
+  classDef auto fill:#F4F4F5,stroke:#71717A,stroke-width:2px,color:#18181B
+  S["👤 Student"]:::actor
+  P["👤 Professor"]:::actor
+  A["👤 Admin"]:::actor
+  G["🖥️ Lab PC agent<br/>(runs on every PC)"]:::actor
+  subgraph SYS["<b>LabSense system</b>"]
+    direction TB
+    subgraph U4["<b>Automatic</b>: no person involved"]
+      UC9([Send a heartbeat every 5 s]):::auto
+      UC10([Recompute the PC's state]):::auto
+      UC11([Report installed software]):::auto
+    end
+    subgraph U3["<b>Admin only</b>"]
+      UC7([Review damage reports]):::uc
+      UC8([Manage labs, PCs & timetable]):::uc
+    end
+    subgraph U2["<b>Professor & Admin</b>"]
+      UC5([Put a PC into or out of maintenance]):::uc
+      UC6([Cancel a timetable slot]):::uc
+    end
+    subgraph U1["<b>All logged-in users</b>"]
+      UC1([Log in]):::uc
+      UC2([View live PC & lab status]):::uc
+      UC3([Search installed software]):::uc
+      UC4([Report a damaged PC]):::uc
+    end
+  end
+  S --- U1
+  P --- U1
+  P --- U2
+  A --- U1
+  A --- U2
+  A --- U3
+  U4 --- G
+  UC9 -. "«include»" .-> UC10

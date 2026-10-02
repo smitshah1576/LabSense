@@ -93,6 +93,8 @@ async def handle_agent_connection(reader: asyncio.StreamReader, writer: asyncio.
                     )
             elif msg_type == "GOING_TO_SLEEP":
                 await state_manager.handle_going_to_sleep(pc_id)
+            elif msg_type == "SHUTTING_DOWN":
+                await state_manager.handle_shutting_down(pc_id)
             elif msg_type == "SOFTWARE_REPORT":
                 packages = msg.get("packages", [])
                 async with pool.acquire() as conn:
