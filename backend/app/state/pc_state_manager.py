@@ -157,7 +157,7 @@ class PCStateManager:
         """Process a SHUTTING_DOWN message (clean power-off or reboot).
 
         A PC that is off is simply free, so it maps to AVAILABLE — the same
-        outcome as the staleness timeout, just without the 15s wait.
+        outcome as the staleness timeout, just without the wait.
         """
         return await self._go_offline(pc_id, PCState.AVAILABLE)
 

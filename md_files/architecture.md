@@ -43,7 +43,7 @@ This replaces an earlier three-OS-thread design (one thread each for the socket 
   - idle time
   - CPU %
 - Special message: `GOING_TO_SLEEP`, sent pre-suspend for graceful disconnection (see above).
-- Special message: `SHUTTING_DOWN`, sent on `PrepareForShutdown` before a clean power-off or reboot. It maps straight to **Available** rather than Available/Sleep, without waiting for the 15-second grace period.
+- Special message: `SHUTTING_DOWN`, sent on `PrepareForShutdown` before a clean power-off or reboot. It maps straight to **Available** rather than Available/Sleep, without waiting for the 60-second grace period.
 - **Open question — not yet decided:** the protocol as currently scoped has no described authentication or integrity check on heartbeat payloads. On a shared lab LAN this is a plausible viva question ("what stops another machine from spoofing a heartbeat?"). Worth a deliberate decision — even "out of scope, here's why" is a defensible answer — rather than leaving it unaddressed.
 
 ## 3. Backend
@@ -162,7 +162,7 @@ CREATE TABLE damage_reports (
 ## PC State Model (4 states — confirmed)
 | State | Definition |
 |---|---|
-| **Available** | No active session, or session idle beyond threshold, or PC off/asleep past the 15-second grace period (see Fault Tolerance below) |
+| **Available** | No active session, or session idle beyond threshold, or PC off/asleep past the 60-second grace period (see Fault Tolerance below) |
 | **In Use** | Session active **AND** at least one of: peripheral idle time below threshold, CPU above threshold, screen locked |
 | **Available/Sleep** | Agent sent `GOING_TO_SLEEP` before disconnecting — this is what distinguishes a clean suspend from a dead/disconnected heartbeat |
 | **Maintenance** | Manual-only flag. Suppresses all automatic agent-driven transitions until cleared |
@@ -170,8 +170,8 @@ CREATE TABLE damage_reports (
 A richer "composite idle" condition was explored early on (detecting audio/video playback via PipeWire/PulseAudio, to catch the "watching a lecture with zero peripheral input" edge case). That's a real gap in the definition above but is **explicitly deferred to future work** — don't fold it into the MVP condition.
 
 ## Fault Tolerance
-**Confirmed design — 15-second grace period.** The server independently tracks heartbeat freshness, separate from event-triggered transitions (a heartbeat arriving, or a `GOING_TO_SLEEP` message arriving). If a PC misses its expected heartbeat (~3 missed ticks at the 5s interval, i.e. ~15 seconds) and hasn't reconnected in that window, it's treated as Powered Off/Disconnected and mapped to **Available** — same outcome as a clean shutdown, since for a student looking for a free seat, the distinction doesn't matter. If the last signal received *was* `GOING_TO_SLEEP`, the PC is already in Available/Sleep and this fallback doesn't apply.
+**Confirmed design — 60-second grace period.** The server independently tracks heartbeat freshness, separate from event-triggered transitions (a heartbeat arriving, or a `GOING_TO_SLEEP` message arriving). If a PC misses its expected heartbeat (~12 missed ticks at the 5s interval, i.e. ~60 seconds) and hasn't reconnected in that window, it's treated as Powered Off/Disconnected and mapped to **Available** — same outcome as a clean shutdown, since for a student looking for a free seat, the distinction doesn't matter. If the last signal received *was* `GOING_TO_SLEEP`, the PC is already in Available/Sleep and this fallback doesn't apply.
 
 This debounces the failure mode that matters most in practice: a 2–3 second Wi-Fi/LAN stutter shouldn't flip a card's state and flip it back. The grace period is what keeps a real disconnect distinguishable from that kind of noise.
 
-**Not yet implemented** — the timer logic itself still needs building; the design (15s / 3 missed heartbeats / maps to Available) is confirmed. This remains the biggest design-to-implementation gap and a likely direct viva probe.
+**Implemented** in `backend/app/state/pc_state_manager.py`. The period is `HEARTBEAT_TIMEOUT_SECONDS` (default 60 s). The original design used 15 s / 3 missed heartbeats; it was raised to 60 s / 12 missed heartbeats so that a dropped connection and the agent's first reconnect attempts don't flip a card. The cost is that a crashed PC reads In Use for up to a minute. Still a likely direct viva probe.
