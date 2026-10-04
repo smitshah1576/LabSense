@@ -18,7 +18,7 @@ Target: live mentor demo within a ~3-week window, followed by viva defense.
 - Damage report flow: student submission → admin review → Maintenance tag.
 
 ## Phase 3 — Integration & Hardening
-- **Heartbeat staleness detection** — implement the confirmed 15-second grace period (~3 missed heartbeats) as server-side timer logic. Priority item; currently the biggest gap between design and implementation.
+- **Heartbeat staleness detection** — implement the confirmed 15-second grace period (~3 missed heartbeats) as server-side timer logic. (Done; the default was later raised to 60 seconds, ~12 missed heartbeats.) Priority item; currently the biggest gap between design and implementation.
 - JWT RBAC wired end-to-end (REST + WebSocket), including the confirmed Maintenance permission split (Admin/Professor direct tag, Student damage-report-only).
 - Resolve the open question on heartbeat authentication/integrity (or explicitly document it as accepted risk).
 - Test full transition chain on real or VM'd machines: In Use → Available → Available/Sleep → wake → In Use, plus Maintenance override, plus Lab State transitions across a timetable boundary.

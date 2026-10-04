@@ -1,0 +1,28 @@
+flowchart TB
+  classDef act fill:#FFFFFF,stroke:#4F46E5,stroke-width:2px,color:#18181B
+  classDef dec fill:#EEF2FF,stroke:#4F46E5,stroke-width:2px,color:#18181B,font-weight:bold
+  classDef term fill:#18181B,stroke:#18181B,color:#FFFFFF
+  classDef timer fill:#FFFBEB,stroke:#F59E0B,stroke-width:2px,color:#18181B
+  subgraph AG["<b>① On the lab PC</b> · the agent repeats this forever"]
+    direction LR
+    st((Start)):::term --> a1[Collect telemetry:<br/>session, lock, idle, CPU]:::act
+    a1 --> a2[Send a HEARTBEAT<br/>over TCP]:::act
+    a2 --> a3[Wait 5 seconds]:::act
+    a3 -- repeat --> a1
+  end
+  subgraph SV["<b>② On the server</b> · for every heartbeat that arrives"]
+    direction LR
+    s1[Check the PC<br/>is registered]:::act --> d1{Registered?}:::dec
+    d1 -- No --> s2[Reply REJECTED,<br/>disconnect]:::act
+    d1 -- Yes --> s3[Work out the state<br/>with the IN_USE rule]:::act
+    s3 --> s4[Restart the<br/>15-second timer]:::act --> d2{State<br/>changed?}:::dec
+    d2 -- Yes --> s5[Save the change<br/>in PostgreSQL]:::act --> s6[Broadcast<br/>the update]:::act
+    d2 -- No --> s6
+    t1>⏱ 15 s with no<br/>heartbeat]:::timer --> s7[Mark the PC<br/>AVAILABLE]:::act --> s6
+  end
+  subgraph BR["<b>③ In every open browser</b>"]
+    direction LR
+    b1[Update the PC card:<br/>colour and numbers]:::act --> e2(((Done))):::term
+  end
+  AG == "HEARTBEAT" ==> SV
+  SV == "pc_update" ==> BR

@@ -17,7 +17,7 @@ SERVER_PORT: int = int(os.environ.get('LABSENSE_SERVER_PORT', '9000'))
 HEARTBEAT_INTERVAL: float = float(os.environ.get('LABSENSE_HEARTBEAT_INTERVAL', '5.0'))
 
 # Interval in seconds between full software package inventory scans
-SOFTWARE_SCAN_INTERVAL: float = float(os.environ.get('LABSENSE_SOFTWARE_SCAN_INTERVAL', '300.0'))
+SOFTWARE_SCAN_INTERVAL: float = float(os.environ.get('LABSENSE_SOFTWARE_SCAN_INTERVAL', '900.0'))
 
 # Unique identifier for this PC; defaults to machine hostname if not specified
 PC_ID: str = os.environ.get('LABSENSE_PC_ID', socket.gethostname())

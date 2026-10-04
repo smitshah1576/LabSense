@@ -13,7 +13,7 @@ Features are split into **In Scope** and **Deferred / Future Work**. Do not mix 
 ### Networking
 - Custom raw TCP heartbeat protocol (hand-rolled, no socket.io/abstraction library).
 - ~5-second heartbeat interval carrying session state, lock state, idle time, CPU%.
-- Heartbeat staleness detection: server-side, independent of event-triggered transitions. **Confirmed design:** a 15-second grace period (~3 missed heartbeats at the 5s interval) debounces minor drops; if no heartbeat arrives and reconnects within that window, the PC is treated as Powered Off/Disconnected and mapped to Available. **Not yet implemented** — see `progress.md`.
+- Heartbeat staleness detection: server-side, independent of event-triggered transitions. **Confirmed design:** a 60-second grace period (~12 missed heartbeats at the 5s interval; 15 seconds in the original design) debounces drops and short reconnects; if no heartbeat arrives and reconnects within that window, the PC is treated as Powered Off/Disconnected and mapped to Available. **Implemented** — see `progress.md`.
 
 ### Backend
 - FastAPI, single uvicorn worker.

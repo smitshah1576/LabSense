@@ -1318,12 +1318,6 @@ svg {
   margin-top: 14px;
 }
 
-.pc__stale {
-  margin-bottom: 8px;
-  font-size: 11.5px;
-  color: var(--text-3);
-}
-
 .kv {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1348,10 +1342,6 @@ svg {
 
 .kv__value svg {
   color: var(--text-3);
-}
-
-.kv--dim .kv__value {
-  color: var(--text-2);
 }
 
 .meter {

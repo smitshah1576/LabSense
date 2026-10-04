@@ -1,11 +1,19 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
-import { FiFlag, FiLoader, FiLock, FiMonitor, FiTool, FiTrash2, FiUnlock, FiUser, FiUserX } from 'react-icons/fi'
+import { FiFlag, FiLoader, FiLock, FiMonitor, FiMoon, FiPower, FiTool, FiTrash2, FiUnlock, FiUser, FiUserX } from 'react-icons/fi'
 import StatusPill from '../ui/StatusPill'
 import { pcStateMeta } from '../../lib/pcState'
 import { formatDuration, relativeTime } from '../../lib/time'
 
 const cpuTone = (cpu) => (cpu >= 85 ? 'meter__fill--max' : cpu >= 30 ? 'meter__fill--hot' : '')
+
+// The server sends null telemetry whenever no heartbeats are arriving, so say
+// why there is nothing to show instead of leaving old readings on the card.
+const noTelemetry = (pc, asleep) => {
+  if (asleep) return { icon: FiMoon, text: 'No readings while asleep' }
+  if (pc.last_heartbeat_at) return { icon: FiPower, text: 'Not reporting — off or disconnected' }
+  return { icon: FiLoader, text: 'Waiting for the first heartbeat' }
+}
 
 const PCCard = ({ pc, now, canMaintain, canDelete, busy, onToggleMaintenance, onDelete }) => {
   const state = pc.current_state
@@ -14,6 +22,7 @@ const PCCard = ({ pc, now, canMaintain, canDelete, busy, onToggleMaintenance, on
   const asleep = state === 'AVAILABLE_SLEEP'
   const cpu = Math.max(0, Math.min(100, Number(pc.cpu_percent) || 0))
   const updated = relativeTime(pc.last_heartbeat_at, now)
+  const empty = noTelemetry(pc, asleep)
 
   return (
     <article className={`card pc tone-${meta.tone}`} aria-label={`${pc.pc_id}, ${meta.label}`}>
@@ -27,40 +36,37 @@ const PCCard = ({ pc, now, canMaintain, canDelete, busy, onToggleMaintenance, on
 
       <div className="pc__body">
         {pc.has_telemetry ? (
-          <>
-            {asleep && <div className="pc__stale">Last reported before sleeping</div>}
-            <dl className={`kv ${asleep ? 'kv--dim' : ''}`}>
-              <div>
-                <dt className="kv__label">CPU</dt>
-                <dd className="kv__value">{cpu.toFixed(1)}%</dd>
-                <div className="meter" aria-hidden="true">
-                  <div className={`meter__fill ${cpuTone(cpu)}`} style={{ width: `${cpu}%` }} />
-                </div>
+          <dl className="kv">
+            <div>
+              <dt className="kv__label">CPU</dt>
+              <dd className="kv__value">{cpu.toFixed(1)}%</dd>
+              <div className="meter" aria-hidden="true">
+                <div className={`meter__fill ${cpuTone(cpu)}`} style={{ width: `${cpu}%` }} />
               </div>
-              <div>
-                <dt className="kv__label">Idle</dt>
-                <dd className="kv__value">{formatDuration(pc.idle_seconds)}</dd>
-              </div>
-              <div>
-                <dt className="kv__label">Session</dt>
-                <dd className="kv__value">
-                  {pc.session_active ? <FiUser size={13} /> : <FiUserX size={13} />}
-                  {pc.session_active ? 'Signed in' : 'No one'}
-                </dd>
-              </div>
-              <div>
-                <dt className="kv__label">Screen</dt>
-                <dd className="kv__value">
-                  {pc.screen_locked ? <FiLock size={13} /> : <FiUnlock size={13} />}
-                  {pc.screen_locked ? 'Locked' : 'Unlocked'}
-                </dd>
-              </div>
-            </dl>
-          </>
+            </div>
+            <div>
+              <dt className="kv__label">Idle</dt>
+              <dd className="kv__value">{formatDuration(pc.idle_seconds)}</dd>
+            </div>
+            <div>
+              <dt className="kv__label">Session</dt>
+              <dd className="kv__value">
+                {pc.session_active ? <FiUser size={13} /> : <FiUserX size={13} />}
+                {pc.session_active ? 'Signed in' : 'No one'}
+              </dd>
+            </div>
+            <div>
+              <dt className="kv__label">Screen</dt>
+              <dd className="kv__value">
+                {pc.screen_locked ? <FiLock size={13} /> : <FiUnlock size={13} />}
+                {pc.screen_locked ? 'Locked' : 'Unlocked'}
+              </dd>
+            </div>
+          </dl>
         ) : (
           <div className="pc__waiting">
-            <FiLoader size={14} />
-            Waiting for the first heartbeat
+            <empty.icon size={14} />
+            {empty.text}
           </div>
         )}
       </div>

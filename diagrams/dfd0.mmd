@@ -1,0 +1,13 @@
+%%{init: {"themeVariables": {"fontSize": "19px"}, "flowchart": {"wrappingWidth": 420, "nodeSpacing": 160, "rankSpacing": 50, "padding": 30}, "markdownAutoWrap": false}}%%
+flowchart LR
+  classDef ent fill:#EEF2FF,stroke:#4F46E5,stroke-width:3px,color:#18181B,font-weight:bold,font-size:28px
+  classDef proc fill:#18181B,stroke:#18181B,color:#FFFFFF,font-weight:bold,font-size:26px
+  ST[Student]:::ent
+  LP[Lab PC agent]:::ent
+  SYS(("&nbsp;0&nbsp;<br/>&nbsp;LabSense&nbsp;<br/>system")):::proc
+  PR[Professor]:::ent
+  AD[Admin]:::ent
+  ST <-- "<b>in:</b> login, search, report<br/><b>out:</b> live status" --> SYS
+  LP <-- "<b>in:</b> heartbeats, software<br/><b>out:</b> REJECTED" --> SYS
+  SYS <-- "<b>in:</b> maintenance, cancel slot<br/><b>out:</b> live status" --> PR
+  SYS <-- "<b>in:</b> labs, PCs, timetable<br/><b>out:</b> damage reports" --> AD

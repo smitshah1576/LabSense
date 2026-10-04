@@ -55,3 +55,12 @@ Thumbs.db
 # Docker / Logs
 *.log
 pgdata/
+
+# Local docs and presentation (kept out of the repository)
+/LabSense — Architecture & Design.pptx
+/MESSAGE_REFERENCE.md
+/PC_STATE_RULES.md
+/SETUP_UBUNTU.md
+/SETUP_WINDOWS_SERVER.md
+/TECHNICAL_GUIDE.md
+/TESTING.md

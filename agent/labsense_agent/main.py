@@ -13,11 +13,13 @@ tasks:
 Critical sleep/shutdown flow:
 
 1.  At startup, an ``InhibitorLock`` is acquired.  This **delays** (not
-    blocks) the OS from suspending until we release it.
+    blocks) the OS from suspending or shutting down until we release it.
 2.  On ``PrepareForSleep(True)``: send ``GOING_TO_SLEEP``, drain the TCP
     writer, *then* release the inhibitor lock.  The OS may now suspend.
 3.  On ``PrepareForSleep(False)`` (resume): re-acquire the inhibitor lock
     for the next sleep cycle.
+4.  On ``PrepareForShutdown(True)``: send ``SHUTTING_DOWN``, drain, release
+    the lock, and stop the agent.  The OS may now power off.
 
 Usage::
 
@@ -79,13 +81,20 @@ async def _on_prepare_shutdown(
     going_to_shutdown: bool,
     heartbeat_client: HeartbeatClient,
     inhibitor: InhibitorLock,
+    shutdown_event: asyncio.Event,
 ) -> None:
-    """Handle ``PrepareForShutdown`` signal from logind."""
+    """Handle ``PrepareForShutdown`` signal from logind.
+
+    Sends ``SHUTTING_DOWN`` rather than ``GOING_TO_SLEEP``: a powered-off PC
+    is Available, not Asleep.  The agent then stops, so no heartbeat can
+    follow the message and flip the state back.
+    """
     if going_to_shutdown:
-        logger.info('System shutting down — sending GOING_TO_SLEEP')
-        await heartbeat_client.send_going_to_sleep()
+        logger.info('System shutting down — sending SHUTTING_DOWN')
+        await heartbeat_client.send_shutting_down()
         await inhibitor.release()
         await heartbeat_client.close()
+        shutdown_event.set()
         logger.info('Shutdown cleanup complete')
 
 
@@ -260,6 +269,9 @@ async def _run() -> None:
     idle_tracker = InputIdleTracker()
     await idle_tracker.start()
 
+    # Set by SIGTERM / SIGINT, and by the PrepareForShutdown callback.
+    shutdown_event = asyncio.Event()
+
     logind_monitor = LogindMonitor(
         on_prepare_sleep=functools.partial(
             _on_prepare_sleep,
@@ -270,6 +282,7 @@ async def _run() -> None:
             _on_prepare_shutdown,
             heartbeat_client=heartbeat_client,
             inhibitor=inhibitor,
+            shutdown_event=shutdown_event,
         ),
         on_lock=_on_lock,
         on_unlock=_on_unlock,
@@ -290,7 +303,6 @@ async def _run() -> None:
     await heartbeat_client.connect()
 
     # --- Shutdown plumbing ---
-    shutdown_event = asyncio.Event()
     _install_signal_handlers(asyncio.get_running_loop(), shutdown_event)
 
     # --- Launch long-running tasks ---

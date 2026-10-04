@@ -245,12 +245,11 @@ Seed logins (all `password123`): `admin@labsense.dev`, `prof@labsense.dev`, `stu
 > hostname, which almost certainly does not match.
 
 ```bash
-sudo apt install -y python3-venv
-```
-
-```bash
 cd agent
 ```
+
+The script installs Python's venv package itself (`python3.12-venv` on Ubuntu 24.04) if the PC
+doesn't have it, so the PC needs to reach the Ubuntu package mirrors and PyPI during deployment.
 
 ```bash
 sudo ./deploy_agent.sh --server-host 10.234.237.199 --server-port 9000 --pc-id lab-a-pc-1

@@ -1,0 +1,17 @@
+flowchart TB
+  classDef obj fill:#FFFFFF,stroke:#3F3F46,stroke-width:2px,color:#18181B
+  classDef me fill:#EEF2FF,stroke:#4F46E5,stroke-width:3px,color:#18181B
+  L[":systemd-logind<br/><i>Linux power manager</i>"]:::obj
+  H[":HeartbeatClient<br/><i>LabSense agent</i>"]:::me
+  T[":tcp.server"]:::obj
+  S[":PCStateManager"]:::obj
+  D[(":PostgreSQL")]:::obj
+  W[":ConnectionManager"]:::obj
+  B[":Browser"]:::obj
+  L -- "<b>1</b> PrepareForSleep" --> H
+  H -. "<b>3</b> release lock" .-> L
+  H -- "<b>2</b> GOING_TO_SLEEP" --> T
+  T -- "<b>4</b> handle_going_to_sleep()" --> S
+  S -- "<b>5</b> save state" --> D
+  S -- "<b>6</b> broadcast" --> W
+  W -- "<b>7</b> pc_update: Sleep" --> B

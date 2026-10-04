@@ -1,0 +1,32 @@
+flowchart LR
+  classDef ent fill:#EEF2FF,stroke:#4F46E5,stroke-width:3px,color:#18181B,font-weight:bold
+  classDef proc fill:#FFFFFF,stroke:#18181B,stroke-width:3px,color:#18181B,font-weight:bold
+  classDef store fill:#F4F4F5,stroke:#71717A,stroke-width:2px,color:#18181B
+  LP[Lab PC<br/>agent]:::ent
+  U[Users<br/>Student ·<br/>Professor ·<br/>Admin]:::ent
+  P1("1.0<br/>Receive<br/>heartbeat"):::proc
+  P2("2.0<br/>Derive<br/>PC state"):::proc
+  P3("3.0<br/>Push live<br/>updates"):::proc
+  P4("4.0<br/>Log in"):::proc
+  P5("5.0<br/>Lab state<br/>& search"):::proc
+  P6("6.0<br/>Maintenance<br/>& reports"):::proc
+  D1[("D1 pcs")]:::store
+  D2[("D2 state_transitions")]:::store
+  D3[("D3 users")]:::store
+  D4[("D4 timetables")]:::store
+  D5[("D5 damage_reports")]:::store
+  LP -- "frames" --> P1
+  P1 -- "telemetry" --> P2
+  P1 <-- "pc_id, software" --> D1
+  P2 -- "state" --> D1
+  P2 -- "transition" --> D2
+  P2 -- "change" --> P3
+  P3 -- "pc_update" --> U
+  U -- "login" --> P4
+  P4 <--> D3
+  U -- "query" --> P5
+  P5 <--> D4
+  D1 -- "software" --> P5
+  U -- "maintenance,<br/>report" --> P6
+  P6 <--> D5
+  P6 -- "maintenance flag" --> P2

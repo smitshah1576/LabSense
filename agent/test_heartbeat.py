@@ -66,7 +66,7 @@ def main() -> int:
             except socket.timeout:
                 print("\nSENT, no reply - the server accepted it.")
                 print(f"Now check the dashboard: '{pc_id}' should read IN_USE,")
-                print("then fall back to Available after the 15s grace period.")
+                print("then fall back to Available after the 60s grace period.")
                 return 0
 
             if not header:

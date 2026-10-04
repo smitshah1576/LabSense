@@ -1,0 +1,60 @@
+---
+config:
+  class:
+    hideEmptyMembersBox: true
+---
+classDiagram
+  direction LR
+  class main["agent.main"] {
+    <<module>>
+    heartbeat_loop()
+    dbus_supervisor()
+  }
+  class LogindMonitor {
+    connect_and_listen()
+  }
+  class HeartbeatClient {
+    send_heartbeat()
+    send_going_to_sleep()
+  }
+  class InhibitorLock {
+    acquire()
+    release()
+  }
+  class InputIdleTracker {
+    idle_seconds()
+  }
+  class tcp_server["tcp.server"] {
+    <<module>>
+    handle_agent_connection()
+  }
+  class PCStateManager {
+    states: dict
+    handle_heartbeat()
+    set_maintenance()
+  }
+  class PCLiveState {
+    current_state
+    session_active
+    idle_seconds
+    is_in_use()
+  }
+  class PCState {
+    <<enumeration>>
+    AVAILABLE
+    IN_USE
+    AVAILABLE_SLEEP
+    MAINTENANCE
+  }
+  class ConnectionManager {
+    broadcast_pc_update()
+  }
+  main *-- LogindMonitor
+  main *-- HeartbeatClient
+  main *-- InhibitorLock
+  main *-- InputIdleTracker
+  HeartbeatClient ..> tcp_server : TCP frames
+  tcp_server --> PCStateManager : calls
+  PCStateManager "1" *-- "many" PCLiveState : one per PC
+  PCLiveState --> PCState
+  PCStateManager ..> ConnectionManager : notifies
