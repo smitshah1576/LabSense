@@ -107,13 +107,49 @@ cp "$SCRIPT_DIR/probe_telemetry.py" "$INSTALL_DIR/"
 # 3. Create Virtual Environment & Install dependencies inside it
 echo -e "${CYAN}[3/6] Setting up Python virtual environment at $VENV_DIR...${NC}"
 
-# Ensure python3-venv is available (required on Debian/Ubuntu)
-if ! python3 -m venv --help &>/dev/null; then
-    echo -e "${YELLOW}  Installing python3-venv package...${NC}"
-    apt-get update -qq && apt-get install -y -qq python3-venv
+export DEBIAN_FRONTEND=noninteractive
+APT_UPDATED=0
+
+# Install apt packages, refreshing the package index once per run.
+apt_install() {
+    if ! command -v apt-get &>/dev/null; then
+        echo -e "${RED}Error: apt-get not found. Install these packages manually, then re-run: $*${NC}"
+        exit 1
+    fi
+    if [ "$APT_UPDATED" -eq 0 ]; then
+        apt-get update -qq
+        APT_UPDATED=1
+    fi
+    apt-get install -y -qq "$@"
+}
+
+if ! command -v python3 &>/dev/null; then
+    echo -e "${YELLOW}  Installing python3...${NC}"
+    apt_install python3
 fi
 
-python3 -m venv "$VENV_DIR"
+# Debian/Ubuntu ship the venv *module* with python3 itself, so
+# `python3 -m venv --help` succeeds on a stock install. What is missing is
+# ensurepip, which lives in python3.X-venv — without it venv creation fails
+# with "ensurepip is not available". So test for ensurepip directly.
+if ! python3 -c 'import ensurepip' &>/dev/null; then
+    PY_VER=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+    echo -e "${YELLOW}  Installing python${PY_VER}-venv package...${NC}"
+    # The versioned package matches whichever python3 is on PATH; the generic
+    # one only follows the distro's default interpreter.
+    apt_install "python${PY_VER}-venv" || apt_install python3-venv || true
+    if ! python3 -c 'import ensurepip' &>/dev/null; then
+        echo -e "${RED}Error: python3 still cannot create virtual environments.${NC}"
+        echo "Install it manually, then re-run: sudo apt install python${PY_VER}-venv"
+        exit 1
+    fi
+fi
+
+# An earlier failed run leaves a venv with no pip in it; rebuild that from
+# scratch. A working venv is kept, so a redeploy doesn't reinstall everything.
+if ! "$VENV_DIR/bin/python3" -m pip --version &>/dev/null; then
+    python3 -m venv --clear "$VENV_DIR"
+fi
 "$VENV_DIR/bin/pip" install --upgrade pip --quiet
 "$VENV_DIR/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
 

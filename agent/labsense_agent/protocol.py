@@ -106,6 +106,22 @@ def create_going_to_sleep(pc_id: str) -> Dict[str, Any]:
     }
 
 
+def create_shutting_down(pc_id: str) -> Dict[str, Any]:
+    """Create a SHUTTING_DOWN message.
+
+    Args:
+        pc_id: Unique identifier of the PC.
+
+    Returns:
+        Dictionary representation of the SHUTTING_DOWN message.
+    """
+    return {
+        'type': 'SHUTTING_DOWN',
+        'pc_id': pc_id,
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def create_software_report(pc_id: str, packages: List[str]) -> Dict[str, Any]:
     """Create a SOFTWARE_REPORT message.
 

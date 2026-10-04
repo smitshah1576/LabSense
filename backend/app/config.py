@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     # "localhost", so every host the dashboard is reached from must be listed.
     # Override via LABSENSE_CORS_ORIGINS in .env (JSON list).
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
-    HEARTBEAT_TIMEOUT_SECONDS: int = 15
+    HEARTBEAT_TIMEOUT_SECONDS: int = 60
     # --- IN_USE rule (see PCStateManager.handle_heartbeat) ---
     # Input within this many seconds counts as someone at the PC.
     IDLE_THRESHOLD_SECONDS: int = 300
@@ -26,7 +26,9 @@ class Settings(BaseSettings):
     CPU_WINDOW_HEARTBEATS: int = 3
     # A locked screen holds the PC as IN_USE for this long after locking; past
     # that, an auto-locked, abandoned session no longer looks occupied.
-    LOCK_RESERVE_SECONDS: int = 900
+    # Keep this above IDLE_THRESHOLD_SECONDS: locking is itself input, so at or
+    # below it a deliberate lock holds the seat no longer than walking away.
+    LOCK_RESERVE_SECONDS: int = 600
     # Lab operating hours and timetable slots are stored as local wall-clock
     # times, so lab state must be computed against this zone — not UTC.
     TIMEZONE: str = "Asia/Kolkata"

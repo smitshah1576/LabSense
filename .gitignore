@@ -67,3 +67,12 @@ agent/.dockerignore
 testbed/*
 # ...except the scale-test tools, which also run against the real server.
 !testbed/loadtest/
+
+# Local docs and presentation (kept out of the repository)
+/LabSense — Architecture & Design.pptx
+/MESSAGE_REFERENCE.md
+/PC_STATE_RULES.md
+/SETUP_UBUNTU.md
+/SETUP_WINDOWS_SERVER.md
+/TECHNICAL_GUIDE.md
+/TESTING.md

@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Set
+from typing import Optional, Set
 from fastapi import WebSocket
 from ..models.enums import LabState
 
@@ -41,9 +41,14 @@ class ConnectionManager:
         await self.broadcast(message)
 
     async def broadcast_pc_heartbeat(self, pc_id: str, state: str,
-                                      session_active: bool, screen_locked: bool,
-                                      idle_seconds: int, cpu_percent: float):
-        """Broadcast full telemetry snapshot for a PC on every heartbeat."""
+                                      session_active: Optional[bool], screen_locked: Optional[bool],
+                                      idle_seconds: Optional[int], cpu_percent: Optional[float]):
+        """Broadcast full telemetry snapshot for a PC on every heartbeat.
+
+        Also sent with every telemetry value None when the PC stops reporting:
+        the explicit nulls are what tell the browser to blank the readings
+        (a state-only ``pc_update`` leaves them as they were).
+        """
         message = {
             "type": "pc_update",
             "pc_id": pc_id,

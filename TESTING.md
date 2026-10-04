@@ -37,7 +37,7 @@ It opens a raw TCP connection, sends exactly one length-prefixed JSON `HEARTBEAT
 and reports whatever comes back.
 
 **Pass:** `SENT, no reply — the server accepted it`, and the `lab-a-pc-1` card on the dashboard turns
-**IN_USE** within a second, then falls back to **Available** about 15 s later when the staleness
+**IN_USE** within a second, then falls back to **Available** about 60 s later when the staleness
 timer fires.
 
 If T2 passes, the network, the wire protocol, the state manager, the database and the WebSocket push
@@ -117,12 +117,12 @@ system bus.
 State rule to check on the dashboard afterwards:
 - Light typing keeps the PC **In use**.
 - 5 minutes hands-off and unlocked turns it **Available**.
-- A locked screen shows **In use** for 15 minutes, then **Available**, unless a CPU-heavy job is still
+- A locked screen shows **In use** for 10 minutes, then **Available**, unless a CPU-heavy job is still
   running (for example `stress --cpu 1`).
 
 ---
 
-## T6 — Heartbeat staleness / the 15-second grace period
+## T6 — Heartbeat staleness / the 60-second grace period
 
 **Run on:** Ubuntu
 
@@ -130,9 +130,10 @@ State rule to check on the dashboard afterwards:
 sudo systemctl stop labsense-agent
 ```
 
-**Pass:** the card flips to **Available** roughly 15 s later (not instantly, not never), the backend
-logs `heartbeat stale after 15s`, and exactly one new row appears in `state_transitions` — a single
-transition, not a flapping sequence.
+**Pass:** the card flips to **Available** roughly 60 s later (not instantly, not never), the backend
+logs `heartbeat stale after 60s`, and exactly one new row appears in `state_transitions` — a single
+transition, not a flapping sequence. At the same moment the CPU / idle / session / screen readings
+are replaced by **"Not reporting — off or disconnected"**; old numbers must not stay on the card.
 
 Restart the agent and confirm the card recovers.
 
@@ -164,6 +165,22 @@ down. The likely cause is the sleep inhibitor lock never actually being held —
 `agent/labsense_agent/inhibitor.py`. **Check this before the demo**, since the suspend guarantee is
 one of the architecture's headline claims.
 
+In both cases the readings are replaced by **"No readings while asleep"** / **"Not reporting"**, and
+they return with the first heartbeat after wake.
+
+### T7b — clean shutdown
+
+```bash
+sudo systemctl poweroff      # or: sudo reboot
+```
+
+**Pass:** the card reads **Available** (not Available/Sleep) with **"Not reporting — off or
+disconnected"**, and the agent's journal from that boot ends with `SHUTTING_DOWN sent and flushed`.
+
+If the card only reaches Available after ~60 s, the message lost the race with the shutdown (same
+inhibitor caveat as above); the end state is still correct. If it reads **Available/Sleep**, the PC
+is running an agent from before `SHUTTING_DOWN` existed — redeploy it.
+
 ---
 
 ## T8 — Maintenance override
@@ -175,6 +192,9 @@ Tag a PC as Maintenance while its agent is still sending heartbeats.
 **Pass:** the state stays **MAINTENANCE** regardless of what the agent reports, and no automatic
 transitions are written. Telemetry (CPU, idle) still updates underneath. Clearing maintenance returns
 it to Available, and normal transitions resume.
+
+Then tag a PC again and **restart the backend**. **Pass:** the card still reads **MAINTENANCE** after
+the agent reconnects, and stays there until the tag is cleared by hand.
 
 Also confirm the permission split: a professor can tag/clear; a student cannot, and only sees the
 damage-report path.
@@ -204,7 +224,7 @@ Remember to delete the test row afterwards.
 
 ## T10 — Software discovery and search
 
-**Run on:** browser, after an agent has been connected for one scan interval (300 s by default)
+**Run on:** browser, after an agent has been connected for one scan interval (900 s by default)
 
 Search for `python3` in both the campus-wide bar and the single-lab bar.
 
@@ -212,7 +232,7 @@ Search for `python3` in both the campus-wide bar and the single-lab bar.
 characters instead, the JSONB column is being read as a string — that indicates the pool's jsonb
 codec is not registered.
 
-To avoid waiting five minutes during a rehearsal, set `LABSENSE_SOFTWARE_SCAN_INTERVAL=30` on the
+To avoid waiting fifteen minutes during a rehearsal, set `LABSENSE_SOFTWARE_SCAN_INTERVAL=30` on the
 agent.
 
 ---

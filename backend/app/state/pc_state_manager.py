@@ -14,10 +14,12 @@ logger = logging.getLogger(__name__)
 class PCLiveState:
     pc_id: str
     current_state: PCState = PCState.AVAILABLE
-    session_active: bool = False
-    screen_locked: bool = False
-    idle_seconds: int = 0
-    cpu_percent: float = 0.0
+    # Telemetry is None whenever no heartbeats are arriving (never reported,
+    # stale, asleep, shut down) so a silent PC never shows old readings.
+    session_active: Optional[bool] = None
+    screen_locked: Optional[bool] = None
+    idle_seconds: Optional[int] = None
+    cpu_percent: Optional[float] = None
     last_heartbeat_at: Optional[datetime] = None
     staleness_task: Optional[asyncio.Task] = None
     # Recent CPU samples; CPU only counts when *all* of them exceed the threshold.
@@ -27,16 +29,32 @@ class PCLiveState:
 
     def record_telemetry(self, session_active: bool, screen_locked: bool,
                          idle_seconds: int, cpu_percent: float, now: datetime) -> None:
-        if screen_locked and not self.screen_locked:
-            self.locked_since = now
-        elif not screen_locked:
+        # Keyed on locked_since rather than the previous screen_locked, which
+        # clear_telemetry() wipes: a PC that wakes still locked must not get a
+        # fresh lock reserve.
+        if not screen_locked:
             self.locked_since = None
+        elif self.locked_since is None:
+            self.locked_since = now
         self.session_active = session_active
         self.screen_locked = screen_locked
         self.idle_seconds = idle_seconds
         self.cpu_percent = cpu_percent
         self.cpu_samples.append(cpu_percent)
         self.last_heartbeat_at = now
+
+    def clear_telemetry(self) -> bool:
+        """Drop the displayed readings once the PC stops reporting.
+
+        Returns True if there was anything to clear. ``last_heartbeat_at`` and
+        the CPU/lock history are kept: they are still true, the readings aren't.
+        """
+        had_telemetry = self.cpu_percent is not None
+        self.session_active = None
+        self.screen_locked = None
+        self.idle_seconds = None
+        self.cpu_percent = None
+        return had_telemetry
 
     def is_in_use(self, now: datetime) -> bool:
         """IN_USE = session_active AND (recent input OR sustained CPU OR recently locked).
@@ -65,11 +83,32 @@ class PCStateManager:
         self._states: dict[str, PCLiveState] = {}
         self._lock = asyncio.Lock()
         self._on_transition: Optional[Callable] = None  # callback for state changes
-    
+        self._on_telemetry_cleared: Optional[Callable] = None  # callback when a PC stops reporting
+
     def set_transition_callback(self, callback: Callable[[str, PCState, PCState], Awaitable[None]]):
         """Set callback called on state transitions: callback(pc_id, old_state, new_state)"""
         self._on_transition = callback
-    
+
+    def set_telemetry_cleared_callback(self, callback: Callable[[str, PCState], Awaitable[None]]):
+        """Set callback called when a PC's telemetry is cleared: callback(pc_id, current_state)"""
+        self._on_telemetry_cleared = callback
+
+    async def restore_maintenance(self, pc_ids: list[str]) -> None:
+        """Seed the store with PCs flagged for maintenance in the database.
+
+        Called once at startup. Maintenance is a manual flag, so it must
+        outlive the in-memory store: without this the first heartbeat after a
+        restart would recompute the state and silently drop it.
+        """
+        async with self._lock:
+            for pc_id in pc_ids:
+                self._states[pc_id] = PCLiveState(pc_id=pc_id, current_state=PCState.MAINTENANCE)
+
+    async def _notify_cleared(self, cleared: bool, pc_id: str, state: PCState) -> None:
+        """Fire the telemetry-cleared callback. Like ``_notify``, called outside the lock."""
+        if cleared and self._on_telemetry_cleared:
+            await self._on_telemetry_cleared(pc_id, state)
+
     async def _notify(self, transition: Optional[tuple[PCState, PCState]], pc_id: str) -> None:
         """Fire the transition callback, if any.
 
@@ -111,29 +150,42 @@ class PCStateManager:
         return transition
 
     async def handle_going_to_sleep(self, pc_id: str) -> Optional[tuple[PCState, PCState]]:
-        """Process a GOING_TO_SLEEP message."""
+        """Process a GOING_TO_SLEEP message (clean suspend)."""
+        return await self._go_offline(pc_id, PCState.AVAILABLE_SLEEP)
+
+    async def handle_shutting_down(self, pc_id: str) -> Optional[tuple[PCState, PCState]]:
+        """Process a SHUTTING_DOWN message (clean power-off or reboot).
+
+        A PC that is off is simply free, so it maps to AVAILABLE — the same
+        outcome as the staleness timeout, just without the wait.
+        """
+        return await self._go_offline(pc_id, PCState.AVAILABLE)
+
+    async def _go_offline(self, pc_id: str, new_state: PCState) -> Optional[tuple[PCState, PCState]]:
+        """The agent announced it is about to stop reporting."""
         async with self._lock:
             if pc_id not in self._states:
                 self._states[pc_id] = PCLiveState(pc_id=pc_id)
-            
+
             state = self._states[pc_id]
-            if state.current_state == PCState.MAINTENANCE:
-                return None
 
-            old_state = state.current_state
-            state.current_state = PCState.AVAILABLE_SLEEP
-
-            # Cancel staleness timer — sleep is a known state
+            # Cancel staleness timer — the silence that follows is expected
             if state.staleness_task:
                 state.staleness_task.cancel()
                 state.staleness_task = None
 
-            transition = (
-                (old_state, PCState.AVAILABLE_SLEEP)
-                if old_state != PCState.AVAILABLE_SLEEP else None
-            )
+            cleared = state.clear_telemetry()
+
+            old_state = state.current_state
+            # MAINTENANCE suppresses the transition, not the telemetry reset
+            if old_state != PCState.MAINTENANCE:
+                state.current_state = new_state
+            current = state.current_state
+
+            transition = (old_state, current) if old_state != current else None
 
         await self._notify(transition, pc_id)
+        await self._notify_cleared(cleared, pc_id, current)
         return transition
 
     async def set_maintenance(self, pc_id: str, is_maintenance: bool) -> Optional[tuple[PCState, PCState]]:
@@ -176,16 +228,23 @@ class PCStateManager:
             await asyncio.sleep(settings.HEARTBEAT_TIMEOUT_SECONDS)
 
             transition = None
+            cleared = False
+            current = None
             async with self._lock:
                 state = self._states.get(pc_id)
-                if state and state.current_state not in (PCState.MAINTENANCE, PCState.AVAILABLE_SLEEP):
-                    old_state = state.current_state
-                    state.current_state = PCState.AVAILABLE
-                    logger.warning(f'PC {pc_id} heartbeat stale after {settings.HEARTBEAT_TIMEOUT_SECONDS}s, marking AVAILABLE')
-                    if old_state != PCState.AVAILABLE:
-                        transition = (old_state, PCState.AVAILABLE)
+                if state:
+                    # The readings are history in every state, MAINTENANCE included
+                    cleared = state.clear_telemetry()
+                    if state.current_state not in (PCState.MAINTENANCE, PCState.AVAILABLE_SLEEP):
+                        old_state = state.current_state
+                        state.current_state = PCState.AVAILABLE
+                        logger.warning(f'PC {pc_id} heartbeat stale after {settings.HEARTBEAT_TIMEOUT_SECONDS}s, marking AVAILABLE')
+                        if old_state != PCState.AVAILABLE:
+                            transition = (old_state, PCState.AVAILABLE)
+                    current = state.current_state
 
             await self._notify(transition, pc_id)
+            await self._notify_cleared(cleared, pc_id, current)
         except asyncio.CancelledError:
             pass  # Timer was reset by a new heartbeat
     
