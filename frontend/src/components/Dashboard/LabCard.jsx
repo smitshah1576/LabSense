@@ -2,10 +2,11 @@ import React from 'react'
 import { Link } from 'react-router-dom'
 import { FiArrowRight, FiClock } from 'react-icons/fi'
 import { StackBar, StateLegend, StatusPill } from '../ui/StatusPill'
+import { labStateMeta } from '../../lib/pcState'
 import { formatClock } from '../../lib/time'
 
 const LabCard = ({ lab, counts, loading }) => (
-  <Link to={`/labs/${lab.lab_id}`} className="card lab-card">
+  <Link to={`/labs/${lab.lab_id}`} className={`card lab-card tone-${labStateMeta(lab.state).tone}`}>
     <div className="lab-card__top">
       <div style={{ minWidth: 0 }}>
         <div className="lab-card__name">{lab.lab_name}</div>
