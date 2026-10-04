@@ -47,11 +47,23 @@ const TimetableView = ({ labId, timetable = [], cancellations = [], onChanged })
     [cancellations, slotsById, todayISO]
   )
 
-  const draftInvalid = clockToMinutes(draft.end_time) <= clockToMinutes(draft.start_time)
+  const draftStart = clockToMinutes(draft.start_time)
+  const draftEnd = clockToMinutes(draft.end_time)
+  const draftInvalid = draftEnd <= draftStart
+  // A lab holds one class at a time. Back-to-back classes (one ends at 11:00,
+  // the next starts at 11:00) don't clash. The server enforces the same rule.
+  const clash = draftInvalid
+    ? null
+    : timetable.find(
+        (s) =>
+          Number(s.day_of_week) === Number(draft.day_of_week) &&
+          clockToMinutes(s.start_time) < draftEnd &&
+          clockToMinutes(s.end_time) > draftStart
+      )
 
   const handleAdd = async (e) => {
     e.preventDefault()
-    if (draftInvalid) return
+    if (draftInvalid || clash) return
     setSaving(true)
     try {
       await timetableApi.createTimetableEntry(labId, {
@@ -221,7 +233,7 @@ const TimetableView = ({ labId, timetable = [], cancellations = [], onChanged })
             <button type="button" className="btn btn--secondary" onClick={() => setAdding(false)} disabled={saving}>
               Cancel
             </button>
-            <button type="submit" className="btn btn--primary" disabled={saving || draftInvalid}>
+            <button type="submit" className="btn btn--primary" disabled={saving || draftInvalid || Boolean(clash)}>
               {saving ? 'Adding…' : 'Add class'}
             </button>
           </>
@@ -285,6 +297,15 @@ const TimetableView = ({ labId, timetable = [], cancellations = [], onChanged })
           </div>
         </div>
         {draftInvalid && <div className="field__error">The class must end after it starts.</div>}
+        {clash && (
+          <div className="field__error" role="alert">
+            Clashes with {clash.course_code || 'another class'} on {weekdayName(clash.day_of_week)}s,{' '}
+            <span className="num">
+              {formatClock(clash.start_time)}–{formatClock(clash.end_time)}
+            </span>
+            . Classes in the same lab can't overlap.
+          </div>
+        )}
       </Modal>
 
       <CancelSlotModal slot={cancelling} onClose={() => setCancelling(null)} onCancelled={onChanged} />

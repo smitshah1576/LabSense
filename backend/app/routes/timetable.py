@@ -7,6 +7,8 @@ from ..auth.dependencies import get_current_user, require_role
 
 router = APIRouter(tags=["timetable"])
 
+DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
 
 @router.get("/labs/{lab_id}/timetable", response_model=list[TimetableEntry])
 async def get_timetable(
@@ -36,13 +38,42 @@ async def create_timetable_entry(
     entry: TimetableCreate,
     request: Request,
 ):
-    """Create a new timetable entry (admin only)."""
+    """Create a new timetable entry (admin only).
+
+    A lab holds one class at a time, so a slot that overlaps another class in
+    the same lab on the same day is refused with 409. Back-to-back classes
+    (one ending at 11:00, the next starting at 11:00) are fine.
+    """
     pool = request.app.state.db_pool
-    async with pool.acquire() as conn:
-        # Verify lab exists
-        lab = await conn.fetchrow("SELECT lab_id FROM labs WHERE lab_id = $1", lab_id)
+    async with pool.acquire() as conn, conn.transaction():
+        # Locking the lab row serialises concurrent additions to the same lab,
+        # so two admins can't both pass the clash check with overlapping slots.
+        lab = await conn.fetchrow("SELECT lab_id FROM labs WHERE lab_id = $1 FOR UPDATE", lab_id)
         if not lab:
             raise HTTPException(status_code=404, detail="Lab not found")
+
+        clash = await conn.fetchrow(
+            """SELECT course_code, start_time, end_time
+               FROM master_timetables
+               WHERE lab_id = $1 AND day_of_week = $2
+                 AND start_time < $4 AND end_time > $3
+               ORDER BY start_time
+               LIMIT 1""",
+            lab_id,
+            entry.day_of_week,
+            entry.start_time,
+            entry.end_time,
+        )
+        if clash:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Clashes with {clash['course_code'] or 'another class'} on "
+                    f"{DAY_NAMES[entry.day_of_week - 1]}s, "
+                    f"{clash['start_time']:%H:%M}–{clash['end_time']:%H:%M}. "
+                    "Classes in the same lab can't overlap."
+                ),
+            )
 
         row = await conn.fetchrow(
             """INSERT INTO master_timetables (lab_id, day_of_week, start_time, end_time, course_code)

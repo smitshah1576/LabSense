@@ -1,6 +1,7 @@
 /* ==========================================================================
    LabSense — design system
    Calm, neutral surfaces; colour is reserved for meaning (PC and lab state).
+   Panels are frosted glass over a soft ambient backdrop (body::before).
    Light theme on :root, dark theme on [data-theme="dark"].
    ========================================================================== */
 
@@ -8,15 +9,27 @@
   color-scheme: light;
 
   /* Surfaces */
-  --bg: #f6f6f7;
+  --bg: #f4f4f6;
   --surface: #ffffff;
-  --surface-2: #f4f4f5;
-  --surface-3: #e9e9ec;
-  --overlay: rgba(9, 9, 11, 0.4);
+  /* Tints, translucent so they sit on glass as well as on solid surfaces */
+  --surface-2: rgba(24, 24, 27, 0.035);
+  --surface-3: rgba(24, 24, 27, 0.07);
+  --overlay: rgba(9, 9, 11, 0.32);
+
+  /* Glass: frosted panels over the ambient backdrop */
+  --glass: rgba(255, 255, 255, 0.52);
+  --glass-strong: rgba(255, 255, 255, 0.84);
+  --glass-edge: rgba(255, 255, 255, 0.75);
+  --glass-blur: blur(18px) saturate(170%);
+  --glass-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 12px 32px -18px rgba(16, 24, 40, 0.18);
+  --ambient-1: rgba(99, 102, 241, 0.3);
+  --ambient-2: rgba(16, 185, 129, 0.22);
+  --ambient-3: rgba(139, 92, 246, 0.24);
+  --ambient-4: rgba(59, 130, 246, 0.2);
 
   /* Lines */
-  --border: #e4e4e7;
-  --border-strong: #d4d4d8;
+  --border: rgba(24, 24, 27, 0.09);
+  --border-strong: rgba(24, 24, 27, 0.16);
 
   /* Text */
   --text: #18181b;
@@ -82,14 +95,23 @@
 [data-theme='dark'] {
   color-scheme: dark;
 
-  --bg: #0c0c0e;
+  --bg: #0b0b0e;
   --surface: #141417;
-  --surface-2: #1b1b1f;
-  --surface-3: #25252a;
-  --overlay: rgba(0, 0, 0, 0.6);
+  --surface-2: rgba(255, 255, 255, 0.04);
+  --surface-3: rgba(255, 255, 255, 0.08);
+  --overlay: rgba(0, 0, 0, 0.5);
 
-  --border: #26262b;
-  --border-strong: #34343a;
+  --glass: rgba(24, 24, 29, 0.56);
+  --glass-strong: rgba(22, 22, 27, 0.86);
+  --glass-edge: rgba(255, 255, 255, 0.06);
+  --glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 16px 36px -18px rgba(0, 0, 0, 0.7);
+  --ambient-1: rgba(99, 102, 241, 0.22);
+  --ambient-2: rgba(16, 185, 129, 0.12);
+  --ambient-3: rgba(139, 92, 246, 0.18);
+  --ambient-4: rgba(59, 130, 246, 0.13);
+
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
 
   --text: #ededf0;
   --text-2: #a6a6ae;
@@ -165,6 +187,32 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+
+/* Ambient backdrop: soft colour fields the glass panels frost over. Fixed and
+   on its own layer, so scrolling doesn't repaint it. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(52vw 46vw at 8% -6%, var(--ambient-1), transparent 72%),
+    radial-gradient(46vw 42vw at 100% 10%, var(--ambient-2), transparent 72%),
+    radial-gradient(56vw 48vw at 78% 104%, var(--ambient-3), transparent 72%),
+    radial-gradient(44vw 40vw at 18% 98%, var(--ambient-4), transparent 72%);
+}
+
+/* The glass recipe, shared by every frosted panel. */
+.glass,
+.card,
+.sidebar,
+.topbar,
+.day,
+.live {
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
 }
 
 h1,
@@ -279,7 +327,7 @@ svg {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--surface);
+  background: var(--glass);
   border-right: 1px solid var(--border);
 }
 
@@ -402,9 +450,7 @@ svg {
   gap: 12px;
   height: var(--topbar-h);
   padding: 0 24px 0 32px;
-  background: color-mix(in srgb, var(--bg) 82%, transparent);
-  backdrop-filter: saturate(180%) blur(10px);
-  -webkit-backdrop-filter: saturate(180%) blur(10px);
+  background: var(--glass);
   border-bottom: 1px solid var(--border);
 }
 
@@ -427,7 +473,7 @@ svg {
   font-size: 12px;
   font-weight: 500;
   color: var(--text-2);
-  background: var(--surface);
+  background: var(--glass);
   border: 1px solid var(--border);
 }
 
@@ -518,10 +564,12 @@ svg {
   right: 0;
   min-width: 220px;
   padding: 6px;
-  background: var(--surface);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md);
+  box-shadow: inset 0 1px 0 var(--glass-edge), var(--shadow-md);
   animation: pop 140ms var(--ease);
 }
 
@@ -864,10 +912,26 @@ svg {
    -------------------------------------------------------------------------- */
 
 .card {
-  background: var(--surface);
+  background: var(--glass);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-xs);
+  box-shadow: inset 0 1px 0 var(--glass-edge), var(--glass-shadow);
+}
+
+/* Lab cards and PC tiles show their state as a thin border all the way round,
+   full strength on hover. --tone-dot comes from the tone-* class. */
+.lab-card,
+.pc {
+  border-color: color-mix(in srgb, var(--tone-dot, var(--border-strong)) 60%, transparent);
+}
+
+.lab-card:hover,
+.pc:hover {
+  border-color: var(--tone-dot, var(--border-strong));
+  box-shadow:
+    inset 0 1px 0 var(--glass-edge),
+    0 0 0 3px color-mix(in srgb, var(--tone-dot, var(--border-strong)) 14%, transparent),
+    var(--glass-shadow);
 }
 
 .card--pad {
@@ -1084,11 +1148,6 @@ svg {
   transition: border-color 140ms var(--ease), box-shadow 140ms var(--ease), transform 140ms var(--ease);
 }
 
-.lab-card:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-sm);
-}
-
 .lab-card__top {
   display: flex;
   align-items: flex-start;
@@ -1275,18 +1334,6 @@ svg {
   transition: border-color 140ms var(--ease), box-shadow 140ms var(--ease);
 }
 
-.pc::before {
-  content: '';
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  background: var(--tone-dot, transparent);
-}
-
-.pc:hover {
-  border-color: var(--border-strong);
-}
-
 .pc__head {
   display: flex;
   align-items: center;
@@ -1447,8 +1494,9 @@ svg {
   flex-direction: column;
   min-height: 180px;
   border-radius: var(--radius-lg);
-  background: var(--surface);
+  background: var(--glass);
   border: 1px solid var(--border);
+  box-shadow: inset 0 1px 0 var(--glass-edge), var(--glass-shadow);
   overflow: hidden;
 }
 
@@ -1887,6 +1935,8 @@ button.chip:hover {
   place-items: center;
   padding: 16px;
   background: var(--overlay);
+  -webkit-backdrop-filter: blur(6px) saturate(120%);
+  backdrop-filter: blur(6px) saturate(120%);
   animation: fade 140ms var(--ease);
 }
 
@@ -1895,10 +1945,12 @@ button.chip:hover {
   max-width: 460px;
   max-height: calc(100vh - 32px);
   overflow-y: auto;
-  background: var(--surface);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
   border: 1px solid var(--border);
   border-radius: 14px;
-  box-shadow: var(--shadow-lg);
+  box-shadow: inset 0 1px 0 var(--glass-edge), var(--shadow-lg);
   animation: rise 180ms var(--ease);
 }
 
@@ -1981,9 +2033,11 @@ button.chip:hover {
   gap: 10px;
   padding: 12px 14px;
   border-radius: var(--radius-lg);
-  background: var(--surface);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
   border: 1px solid var(--border);
-  box-shadow: var(--shadow-md);
+  box-shadow: inset 0 1px 0 var(--glass-edge), var(--shadow-md);
   font-size: 13px;
   animation: rise 180ms var(--ease);
 }
@@ -2021,7 +2075,11 @@ button.chip:hover {
   flex-direction: column;
   justify-content: space-between;
   padding: 40px 48px;
-  background: #111113;
+  background:
+    radial-gradient(60% 50% at 0% 0%, rgba(99, 102, 241, 0.34), transparent 70%),
+    radial-gradient(50% 45% at 100% 55%, rgba(16, 185, 129, 0.2), transparent 70%),
+    radial-gradient(55% 45% at 30% 100%, rgba(139, 92, 246, 0.24), transparent 70%),
+    #111113;
   color: #ededf0;
   overflow: hidden;
 }
@@ -2071,8 +2129,11 @@ button.chip:hover {
   aspect-ratio: 1 / 0.8;
   padding: 8px;
   border-radius: 8px;
-  background: #1a1a1d;
-  border: 1px solid #27272b;
+  background: rgba(255, 255, 255, 0.05);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .auth__preview-pc i {
@@ -2088,7 +2149,7 @@ button.chip:hover {
   height: 4px;
   margin-top: 14px;
   border-radius: 2px;
-  background: #2c2c31;
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .auth__preview-pc b + b {
@@ -2105,12 +2166,18 @@ button.chip:hover {
   display: grid;
   place-items: center;
   padding: 40px 24px;
-  background: var(--bg);
 }
 
 .auth__form {
   width: 100%;
-  max-width: 360px;
+  max-width: 408px;
+  padding: 32px 24px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 1px 0 var(--glass-edge), var(--glass-shadow);
 }
 
 .auth__form h2 {
@@ -2192,6 +2259,8 @@ button.chip:hover {
     inset: 0;
     z-index: 65;
     background: var(--overlay);
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
     animation: fade 140ms var(--ease);
   }
 
@@ -2285,6 +2354,31 @@ button.chip:hover {
   }
 
   .live__text {
+    display: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Glass fallbacks: solid panels when the browser can't blur, or the user has
+   asked the system for less transparency.
+   -------------------------------------------------------------------------- */
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root,
+  [data-theme='dark'] {
+    --glass: var(--surface);
+    --glass-strong: var(--surface);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root,
+  [data-theme='dark'] {
+    --glass: var(--surface);
+    --glass-strong: var(--surface);
+  }
+
+  body::before {
     display: none;
   }
 }

@@ -2,7 +2,7 @@
 
 from datetime import date, datetime, time
 from typing import Any, Optional
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .enums import DamageReportStatus, PCState, UserRole
 
@@ -119,10 +119,16 @@ class TimetableCreate(BaseModel):
     """Schema for creating a new timetable slot."""
 
     lab_id: str
-    day_of_week: int
+    day_of_week: int = Field(ge=1, le=7)  # Monday = 1 ... Sunday = 7
     start_time: time
     end_time: time
     course_code: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _ends_after_it_starts(self):
+        if self.end_time <= self.start_time:
+            raise ValueError("The class must end after it starts")
+        return self
 
 
 class SlotCancellation(BaseModel):
