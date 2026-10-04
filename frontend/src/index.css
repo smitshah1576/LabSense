@@ -1,7 +1,7 @@
 /* ==========================================================================
    LabSense — design system
    Calm, neutral surfaces; colour is reserved for meaning (PC and lab state).
-   Panels are frosted glass over a soft ambient backdrop (body::before).
+   Panels are frosted glass: translucent and blurred over whatever is behind.
    Light theme on :root, dark theme on [data-theme="dark"].
    ========================================================================== */
 
@@ -16,16 +16,12 @@
   --surface-3: rgba(24, 24, 27, 0.07);
   --overlay: rgba(9, 9, 11, 0.32);
 
-  /* Glass: frosted panels over the ambient backdrop */
-  --glass: rgba(255, 255, 255, 0.52);
+  /* Glass: frosted, translucent panels */
+  --glass: rgba(255, 255, 255, 0.7);
   --glass-strong: rgba(255, 255, 255, 0.84);
   --glass-edge: rgba(255, 255, 255, 0.75);
   --glass-blur: blur(18px) saturate(170%);
   --glass-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 12px 32px -18px rgba(16, 24, 40, 0.18);
-  --ambient-1: rgba(99, 102, 241, 0.3);
-  --ambient-2: rgba(16, 185, 129, 0.22);
-  --ambient-3: rgba(139, 92, 246, 0.24);
-  --ambient-4: rgba(59, 130, 246, 0.2);
 
   /* Lines */
   --border: rgba(24, 24, 27, 0.09);
@@ -105,10 +101,6 @@
   --glass-strong: rgba(22, 22, 27, 0.86);
   --glass-edge: rgba(255, 255, 255, 0.06);
   --glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 16px 36px -18px rgba(0, 0, 0, 0.7);
-  --ambient-1: rgba(99, 102, 241, 0.22);
-  --ambient-2: rgba(16, 185, 129, 0.12);
-  --ambient-3: rgba(139, 92, 246, 0.18);
-  --ambient-4: rgba(59, 130, 246, 0.13);
 
   --border: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.14);
@@ -187,21 +179,6 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
-}
-
-/* Ambient backdrop: soft colour fields the glass panels frost over. Fixed and
-   on its own layer, so scrolling doesn't repaint it. */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background:
-    radial-gradient(52vw 46vw at 8% -6%, var(--ambient-1), transparent 72%),
-    radial-gradient(46vw 42vw at 100% 10%, var(--ambient-2), transparent 72%),
-    radial-gradient(56vw 48vw at 78% 104%, var(--ambient-3), transparent 72%),
-    radial-gradient(44vw 40vw at 18% 98%, var(--ambient-4), transparent 72%);
 }
 
 /* The glass recipe, shared by every frosted panel. */
@@ -2075,11 +2052,7 @@ button.chip:hover {
   flex-direction: column;
   justify-content: space-between;
   padding: 40px 48px;
-  background:
-    radial-gradient(60% 50% at 0% 0%, rgba(99, 102, 241, 0.34), transparent 70%),
-    radial-gradient(50% 45% at 100% 55%, rgba(16, 185, 129, 0.2), transparent 70%),
-    radial-gradient(55% 45% at 30% 100%, rgba(139, 92, 246, 0.24), transparent 70%),
-    #111113;
+  background: #111113;
   color: #ededf0;
   overflow: hidden;
 }
@@ -2376,9 +2349,5 @@ button.chip:hover {
   [data-theme='dark'] {
     --glass: var(--surface);
     --glass-strong: var(--surface);
-  }
-
-  body::before {
-    display: none;
   }
 }
