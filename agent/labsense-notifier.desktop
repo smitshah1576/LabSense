@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=LabSense Notifier
+Comment=Shows a notice when lab staff mark this PC for maintenance
+Exec=env PYTHONPATH=/opt/labsense-agent /opt/labsense-agent/.venv/bin/python3 -m labsense_agent.notifier
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

@@ -33,3 +33,11 @@ LOG_LEVEL: str = os.environ.get('LABSENSE_LOG_LEVEL', 'INFO').upper()
 # Number of heartbeats between periodic INFO-level "still alive" log lines.
 # At the default 5s interval, 12 heartbeats is roughly one line per minute.
 HEARTBEAT_LOG_EVERY: int = int(os.environ.get('LABSENSE_HEARTBEAT_LOG_EVERY', '12'))
+
+# Directory where the agent publishes this PC's maintenance status for the
+# per-user desktop notifier. systemd creates it (RuntimeDirectory=labsense);
+# being under /run, it starts empty on every boot.
+STATE_DIR: str = os.environ.get('LABSENSE_STATE_DIR', '/run/labsense')
+
+# Seconds between the desktop notifier's checks of the maintenance status file.
+NOTIFIER_POLL_INTERVAL: float = float(os.environ.get('LABSENSE_NOTIFIER_POLL_INTERVAL', '5.0'))

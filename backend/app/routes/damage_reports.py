@@ -121,6 +121,8 @@ async def resolve_report(
                     new_state.value if hasattr(new_state, "value") else str(new_state),
                 )
 
+            await request.app.state.agent_registry.send_maintenance_status(pc_id, True)
+
         updated = await conn.fetchrow(
             "SELECT * FROM damage_reports WHERE report_id = $1", report_id
         )

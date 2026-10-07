@@ -10,6 +10,10 @@ tasks:
 3. **Software Scan Task** — periodic ``scan_all_software()`` and
    ``SOFTWARE_REPORT`` sending every ``SOFTWARE_SCAN_INTERVAL`` seconds.
 
+Maintenance notices: the server sends ``MAINTENANCE_STATUS`` on every connect
+and on every toggle; the agent publishes it to ``config.STATE_DIR`` (see
+``maintenance_state``) for the per-user desktop notifier (``notifier``).
+
 Critical sleep/shutdown flow:
 
 1.  At startup, an ``InhibitorLock`` is acquired.  This **delays** (not
@@ -34,7 +38,7 @@ import logging
 import signal
 import sys
 
-from . import config
+from . import config, maintenance_state
 from .dbus_monitor import LogindMonitor
 from .heartbeat import HeartbeatClient
 from .inhibitor import InhibitorLock
@@ -264,7 +268,11 @@ async def _run() -> None:
     )
 
     # --- Initialise components ---
-    heartbeat_client = HeartbeatClient()
+    heartbeat_client = HeartbeatClient(
+        on_maintenance_status=functools.partial(
+            maintenance_state.write_status, pc_id=config.PC_ID
+        ),
+    )
     inhibitor = InhibitorLock()
     idle_tracker = InputIdleTracker()
     await idle_tracker.start()

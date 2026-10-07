@@ -178,6 +178,10 @@ Type=simple
 User=labsense
 # Read access to /dev/input/event* for precise idle time (timing only).
 SupplementaryGroups=input
+# /run/labsense/maintenance.json is read by the desktop notifier, which runs
+# as the logged-in user, so the directory must be world-readable.
+RuntimeDirectory=labsense
+RuntimeDirectoryMode=0755
 Environment=LABSENSE_SERVER_HOST=$SERVER_HOST
 Environment=LABSENSE_SERVER_PORT=$SERVER_PORT
 Environment=LABSENSE_PC_ID=$PC_ID
@@ -195,6 +199,11 @@ WantedBy=multi-user.target
 EOF
 
 chmod 644 "$SERVICE_FILE"
+
+# Desktop notifier: started in every graphical login, it shows a notice while
+# this PC is marked for maintenance (the service itself can't reach the
+# user's desktop).
+install -D -m 644 "$SCRIPT_DIR/labsense-notifier.desktop" /etc/xdg/autostart/labsense-notifier.desktop
 
 # 6. Enable and start systemd service
 echo -e "${CYAN}[6/6] Reloading systemd and starting service...${NC}"
@@ -216,4 +225,8 @@ echo -e "  • Check telemetry probes: ${YELLOW}sudo -u labsense $VENV_DIR/bin/p
 echo ""
 echo -e "Note: the 'labsense' user is in the 'input' group so it can measure idle"
 echo -e "time. It records only when input happened, never which keys were pressed."
+echo ""
+echo -e "Maintenance notices are shown by a desktop notifier that starts at login"
+echo -e "(/etc/xdg/autostart/labsense-notifier.desktop). Users already logged in"
+echo -e "see them after their next login."
 echo ""

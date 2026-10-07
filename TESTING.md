@@ -199,6 +199,21 @@ the agent reconnects, and stays there until the tag is cleared by hand.
 Also confirm the permission split: a professor can tag/clear; a student cannot, and only sees the
 damage-report path.
 
+### T8b — Maintenance notice on the PC
+
+**Run on:** a lab PC deployed with `deploy_agent.sh`, logged in to the desktop; browser as admin
+
+1. Tag the PC as Maintenance. **Pass:** within ~5 s a critical *"This PC is under maintenance"*
+   notification appears on the PC and stays until dismissed. `journalctl -u labsense-agent` shows
+   *Server reports this PC is under maintenance* and `/run/labsense/maintenance.json` reads `true`.
+2. Reboot the PC and log in. **Pass:** the notice appears again.
+3. Clear the tag. **Pass:** the notice is withdrawn and *"This PC is back in service"* is shown.
+4. Reboot and log in. **Pass:** no notice.
+
+Approving a damage report for the PC must show the same notice as step 1. If nothing appears, check
+that `/etc/xdg/autostart/labsense-notifier.desktop` exists and that `pgrep -af labsense_agent.notifier`
+lists a process for the logged-in user.
+
 ---
 
 ## T9 — Lab state across a timetable boundary

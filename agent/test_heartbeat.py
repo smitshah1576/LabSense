@@ -15,7 +15,10 @@ Examples:
 What the outcomes mean:
     "Connection refused"     backend isn't running, or isn't listening on 0.0.0.0
     "timed out"              firewall dropping the packets, or Wi-Fi client isolation
-    "SENT, no reply"         accepted — check the dashboard for the PC turning IN_USE
+    "MAINTENANCE_STATUS"     accepted — the server tells every registered agent on
+                             connect whether its PC is under maintenance; check the
+                             dashboard for the PC turning IN_USE
+    "SENT, no reply"         accepted by a backend from before MAINTENANCE_STATUS
     "REJECTED"               pc_id isn't registered in the pcs table; heartbeats
                              from it are discarded
 """
@@ -58,8 +61,9 @@ def main() -> int:
             sock.sendall(frame)
             print(f"  sent {len(frame)} bytes ({len(payload)}-byte payload)")
 
-            # The server only replies to say something is wrong, so a timeout
-            # here is the success case.
+            # A current server answers a registered pc_id with
+            # MAINTENANCE_STATUS; an older one stays silent unless something
+            # is wrong, so a timeout is also success.
             sock.settimeout(REPLY_TIMEOUT)
             try:
                 header = sock.recv(4)
@@ -83,6 +87,12 @@ def main() -> int:
 
             reply = json.loads(body.decode("utf-8"))
             print(f"\nServer replied: {reply}")
+            if reply.get("type") == "MAINTENANCE_STATUS":
+                state = "UNDER MAINTENANCE" if reply.get("is_maintenance") else "in service"
+                print(f"\nAccepted - the server says '{pc_id}' is {state}.")
+                print(f"Now check the dashboard: '{pc_id}' should read IN_USE")
+                print("(or MAINTENANCE if tagged).")
+                return 0
             if reply.get("type") == "REJECTED":
                 print(f"\npc_id '{pc_id}' is NOT registered - its heartbeats are discarded.")
                 print("Register it (POST /admin/pcs) or use an existing pc_id:")

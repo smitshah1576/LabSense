@@ -3,6 +3,15 @@
 Implements length-prefixed JSON messaging over raw TCP streams.
 Each message consists of a 4-byte big-endian unsigned integer indicating the length
 of the payload, followed by the UTF-8 encoded JSON payload.
+
+Agent-to-server messages: HEARTBEAT, GOING_TO_SLEEP, SHUTTING_DOWN,
+SOFTWARE_REPORT (built below).
+
+Server-to-agent messages (received only, see ``HeartbeatClient``):
+
+- ``REJECTED``           — this ``pc_id`` is not registered; the server hangs up.
+- ``MAINTENANCE_STATUS`` — ``{"is_maintenance": bool}``; sent on every connect
+  and whenever an admin or professor toggles maintenance.
 """
 
 from __future__ import annotations

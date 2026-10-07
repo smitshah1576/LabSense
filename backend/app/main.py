@@ -9,6 +9,7 @@ from .database import create_pool, get_pool, close_pool
 from .state.pc_state_manager import PCStateManager
 from .ws.manager import ConnectionManager
 from .tcp.server import start_tcp_server
+from .tcp.registry import AgentRegistry
 
 from .routes import auth, labs, pcs, software, timetable, damage_reports, ws, pc_registration
 
@@ -26,9 +27,11 @@ async def lifespan(app: FastAPI):
     # 2. Initialize Managers
     state_manager = PCStateManager()
     ws_manager = ConnectionManager()
+    agent_registry = AgentRegistry()
     
     app.state.pc_state_manager = state_manager
     app.state.ws_manager = ws_manager
+    app.state.agent_registry = agent_registry
     app.state.db_pool = pool
     
     # 3. Setup transition callback
@@ -100,6 +103,7 @@ async def lifespan(app: FastAPI):
         state_manager=state_manager,
         ws_manager=ws_manager,
         pool=pool,
+        agent_registry=agent_registry,
         host=settings.TCP_HOST,
         port=settings.TCP_PORT
     )

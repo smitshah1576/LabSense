@@ -98,4 +98,8 @@ async def toggle_maintenance(
                 new_state.value if hasattr(new_state, "value") else str(new_state),
             )
 
+    # Tell the PC itself so its user gets a desktop notice. If the agent is
+    # offline it receives the status on its next connect instead.
+    await request.app.state.agent_registry.send_maintenance_status(pc_id, toggle.is_maintenance)
+
     return {"message": "Maintenance mode updated successfully"}

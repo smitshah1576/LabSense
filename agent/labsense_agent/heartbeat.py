@@ -12,14 +12,16 @@ Connection management:
 - A background reader task consumes server-to-agent control messages.  The
   protocol is bidirectional: the server replies with ``REJECTED`` when this
   agent's ``pc_id`` is not registered, which would otherwise look exactly
-  like a healthy connection from the agent's side.
+  like a healthy connection from the agent's side, and sends
+  ``MAINTENANCE_STATUS`` on every connect and whenever maintenance is
+  toggled, which is handed to the ``on_maintenance_status`` callback.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 from . import config
 from .protocol import (
@@ -44,6 +46,7 @@ class HeartbeatClient:
         host: str = config.SERVER_HOST,
         port: int = config.SERVER_PORT,
         pc_id: str = config.PC_ID,
+        on_maintenance_status: Optional[Callable[[bool], None]] = None,
     ) -> None:
         self._host = host
         self._port = port
@@ -58,6 +61,8 @@ class HeartbeatClient:
         # Set when the server explicitly rejects this pc_id, so the reconnect
         # loop doesn't hide the reason behind a generic "connected" message.
         self._rejected = False
+        # Called with the server's maintenance flag on every MAINTENANCE_STATUS.
+        self._on_maintenance_status = on_maintenance_status
 
     @property
     def connected(self) -> bool:
@@ -146,6 +151,17 @@ class HeartbeatClient:
                 msg.get('pc_id', self._pc_id),
                 msg.get('reason', 'unknown reason'),
             )
+        elif msg_type == 'MAINTENANCE_STATUS':
+            is_maintenance = bool(msg.get('is_maintenance', False))
+            logger.info(
+                'Server reports this PC is %s',
+                'under maintenance' if is_maintenance else 'in service',
+            )
+            if self._on_maintenance_status is not None:
+                try:
+                    self._on_maintenance_status(is_maintenance)
+                except Exception:
+                    logger.exception('Error handling MAINTENANCE_STATUS')
         else:
             logger.info('Received %s from server: %s', msg_type, msg)
 

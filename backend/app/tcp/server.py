@@ -2,10 +2,13 @@ import asyncio
 import json
 import struct
 import logging
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 from ..state.pc_state_manager import PCStateManager
 from ..ws.manager import ConnectionManager
 from ..models.enums import PCState
+
+if TYPE_CHECKING:
+    from .registry import AgentRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -27,13 +30,16 @@ async def read_message(reader: asyncio.StreamReader) -> Optional[dict]:
         return None
 
 async def handle_agent_connection(reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
-                                  state_manager: PCStateManager, ws_manager: ConnectionManager, pool):
+                                  state_manager: PCStateManager, ws_manager: ConnectionManager, pool,
+                                  agent_registry: "AgentRegistry"):
     addr = writer.get_extra_info('peername')
     logger.info(f"New agent connection from {addr}")
     pc_id = None
     # Cache of validated pc_ids for this connection — one DB lookup per pc_id,
     # not per message.  True = registered, False = rejected.
     validated_pcs: dict[str, bool] = {}
+    # pc_ids registered with agent_registry by this connection, for cleanup.
+    registered_pcs: set[str] = set()
     try:
         while True:
             msg = await read_message(reader)
@@ -50,9 +56,19 @@ async def handle_agent_connection(reader: asyncio.StreamReader, writer: asyncio.
             if pc_id not in validated_pcs:
                 async with pool.acquire() as conn:
                     row = await conn.fetchrow(
-                        "SELECT 1 FROM pcs WHERE pc_id = $1", pc_id
+                        "SELECT is_maintenance FROM pcs WHERE pc_id = $1", pc_id
                     )
                 validated_pcs[pc_id] = row is not None
+
+                if row is not None:
+                    # Register for pushes, then tell the agent where it
+                    # stands. Sending on every connect is what re-shows the
+                    # maintenance notice after each boot until it is cleared.
+                    agent_registry.register(pc_id, writer)
+                    registered_pcs.add(pc_id)
+                    await agent_registry.send_maintenance_status(
+                        pc_id, bool(row["is_maintenance"])
+                    )
 
             if not validated_pcs[pc_id]:
                 # Tell the agent why, then hang up. Dropping these silently
@@ -109,12 +125,15 @@ async def handle_agent_connection(reader: asyncio.StreamReader, writer: asyncio.
         logger.error(f"Error handling agent connection {addr}: {e}")
     finally:
         logger.info(f"Agent connection closed: {addr}")
+        for registered in registered_pcs:
+            agent_registry.unregister(registered, writer)
         writer.close()
         await writer.wait_closed()
 
-async def start_tcp_server(state_manager: PCStateManager, ws_manager: ConnectionManager, pool, host: str, port: int):
+async def start_tcp_server(state_manager: PCStateManager, ws_manager: ConnectionManager, pool,
+                           agent_registry: "AgentRegistry", host: str, port: int):
     async def handler(reader, writer):
-        await handle_agent_connection(reader, writer, state_manager, ws_manager, pool)
+        await handle_agent_connection(reader, writer, state_manager, ws_manager, pool, agent_registry)
         
     server = await asyncio.start_server(handler, host, port)
     logger.info(f"TCP server listening on {host}:{port}")

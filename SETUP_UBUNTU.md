@@ -212,6 +212,10 @@ cd LabSense/agent
 sudo ./deploy_agent.sh --server-host 127.0.0.1 --server-port 9000 --pc-id lab-a-pc-1
 ```
 
+The script also installs a desktop notifier (`/etc/xdg/autostart/labsense-notifier.desktop`) that
+starts at every login and shows a notice while the PC is marked for maintenance. Users who are
+already logged in get it from their next login.
+
 Useful agent management commands:
 ```bash
 # Check service status
